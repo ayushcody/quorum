@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CheckoutPaymentIntent, OrdersCardVerificationMethod, type ApiResult, type PaypalClient } from "paypal";
-import type { R1Env } from "./clients.ts";
+import type { SandboxCard } from "../r2/card.ts";
 
 // R1: AUTHORIZE with third-party payee → partial capture / void / reauthorize. Every write
 // carries an explicit PayPal-Request-Id; the SDK's own per-call Idempotency-Key does not span calls.
@@ -26,7 +26,7 @@ function toOutcome<T>(result: ApiResult<T, any>): Outcome<T> {
 
 export const cents = (n: number) => (n / 100).toFixed(2);
 
-export type Funding = { kind: "card"; env: R1Env } | { kind: "wallet" };
+export type Funding = { kind: "card"; card: SandboxCard } | { kind: "wallet" };
 
 export type CreateArgs = {
   amountCents: number;
@@ -44,9 +44,9 @@ export async function createAuthorizeOrder(client: PaypalClient, args: CreateArg
       ? {
           card: {
             name: "Quorum Bot",
-            number: args.funding.env.SANDBOX_CARD_NUMBER,
-            expiry: args.funding.env.SANDBOX_CARD_EXPIRY,
-            securityCode: args.funding.env.SANDBOX_CARD_CVV,
+            number: args.funding.card.number,
+            expiry: args.funding.card.expiry,
+            securityCode: args.funding.card.securityCode,
             attributes: { verification: { method: OrdersCardVerificationMethod.ScaWhenRequired } },
           },
         }

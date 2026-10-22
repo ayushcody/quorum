@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildClients, loadR1Env } from "../../spikes/r1/clients.ts";
+import { loadSandboxCard } from "../../spikes/r2/card.ts";
 import {
   capturePartial,
   createAuthorizeOrder,
@@ -27,7 +28,7 @@ const CAPTURE_CENTS = 600;
 describe("R1: authorization lifecycle", () => {
   const env = loadR1Env();
   const { coop, supplier } = buildClients(env);
-  const funding = { kind: "card" as const, env };
+  const funding = { kind: "card" as const, card: loadSandboxCard(env) };
   const mandateHash = createHash("sha256").update(`r1-${Date.now()}`).digest("hex");
 
   afterAll(() => {

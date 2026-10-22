@@ -32,7 +32,7 @@ Phase 1 decision gate (docs/PLAN.md). Each decision cites the evidence in `docs/
 
 **Decision.** Policy may plan `Reauth` only when `now > honor_ends_at` (created + 72 h) and the authorization is still inside PayPal's validity window. The fallback is therefore "past the honor period, reauthorize, then capture the new id", not a pre-emptive reauth. Rounds are still designed to close inside 72 h.
 
-**Follow-up.** Exercise a successful reauthorize live: hold one sandbox authorization open from Day 1 and reauthorize it on Day 4 or later (during S2.7). The SDK's `reauthorizePayment` has no `PayPal-Mock-Response` field, so negative-testing it needs a raw call.
+**Follow-up.** Exercise a successful reauthorize live. R2 left bot-3's card authorization `82C58801S8168605E` open for this (created 2026-10-22T10:51:04Z, honor period ends 2026-10-25T10:51Z, expires 2026-11-20). Reauthorize it on Day 4 or later, during S2.7. The SDK's `reauthorizePayment` has no `PayPal-Mock-Response` field, so negative-testing it needs a raw call.
 
 ## D3 · SDK transport fix (2026-10-22)
 
@@ -40,10 +40,35 @@ Phase 1 decision gate (docs/PLAN.md). Each decision cites the evidence in `docs/
 
 **Decision.** `src/paypal/client.ts` builds the client with a `ClientOptions.fetch` wrapper that sets `Content-Type: application/json` on every non-GET request (see `spikes/r1/clients.ts`). Error handling reads PayPal's error model from `payload.body` on typed error arms.
 
+## D4 · Bot members authorize with sandbox cards, in demo mode only (2026-10-22)
+
+**Context.** R2 asked whether seeded "bot" members can authorize with no buyer approval step, so a judge can run a full round with zero setup.
+
+**Evidence** (`test/sandbox/bot-authorize.sandbox.test.ts`, co-op app with ACDC enabled, generated US Visa, `PAYEE_MODE=coop_merchant`):
+
+| Bot | Order (one createOrder call) | Authorization | Next step |
+|---|---|---|---|
+| bot-1 | `4G023762PE2323331` COMPLETED | `7SG08247AR6349919` CREATED | captured $6.00 of $10.00, final → `61P384428C347241W` COMPLETED; authorization CAPTURED |
+| bot-2 | `5A543397VM668010C` COMPLETED | `8XL4147766030574P` CREATED | voided → VOIDED |
+| bot-3 | `5MH158086G011021F` COMPLETED | `82C58801S8168605E` CREATED | left open for the D2 reauth follow-up |
+
+**Decision.**
+- In **demo mode only** (judge mode, `seed:demo`, smoke tests), bot members authorize server-side with `payment_source.card`, intent AUTHORIZE, no payee (D1), and `custom_id` = mandate hash, all in one `createOrder` call.
+- **The human pledge path stays PayPal-button based (JS SDK v6):** create order → buyer approves in the PayPal popup → `authorizeOrder`. Real members never type card numbers into Quorum.
+- Card data comes only from the `SANDBOX_CARD_*` env vars (PayPal's published sandbox test cards). Card fields are never logged.
+- A non-demo round must refuse the card path. The pledge service enforces this with an `is_demo` check on the round, tested in S2.5.
+
+**ACDC quirks found**
+- **Single step:** a card-funded AUTHORIZE order comes back `COMPLETED` with the authorization inline. There is no approval step and no `authorizeOrder` call. The bot code path therefore never calls `authorizeOrder`.
+- **No 3DS** challenge was triggered with `verification.method = SCA_WHEN_REQUIRED` for the generated US Visa.
+- **Expiry format:** the card generator shows `MM/YYYY`, but PayPal requires `YYYY-MM`. `spikes/r2/card.ts` normalizes it.
+- `processor_response` is absent on the sandbox authorization, and seller protection is `NOT_ELIGIBLE`, so neither can be relied on in the UI.
+- The authorization lifetime matches wallet authorizations: created + 29 days. The capture showed a $0.65 sandbox PayPal fee on $6.00, so the cockpit should show net amounts if it shows fees at all.
+
 ## Pending gate items
 
 | Item | Status |
 |---|---|
-| Bot authorization mode (R2, S1.2) | pending |
+| Bot authorization mode (R2, S1.2) | **decided: D4** |
 | AG Studio + Bryntum layout (R3, S1.3) | pending |
 | Supplier DB role on Render (S1.4) | pending |

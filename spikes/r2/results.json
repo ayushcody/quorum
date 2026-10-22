@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-22T10:51:11.667Z",
+  "rows": [
+    {
+      "label": "bot-1",
+      "ok": true,
+      "orderId": "4G023762PE2323331",
+      "orderStatus": "COMPLETED",
+      "authorizationId": "7SG08247AR6349919",
+      "authorizationStatus": "CREATED",
+      "expiresAt": "2026-11-20T10:50:58Z",
+      "mandateHash": "7961ad47726f9be060a28f0ca566fbc24bb98c144ac195de6b1d9ffb979b5ef2",
+      "customId": "7961ad47726f9be060a28f0ca566fbc24bb98c144ac195de6b1d9ffb979b5ef2"
+    },
+    {
+      "label": "bot-2",
+      "ok": true,
+      "orderId": "5A543397VM668010C",
+      "orderStatus": "COMPLETED",
+      "authorizationId": "8XL4147766030574P",
+      "authorizationStatus": "CREATED",
+      "expiresAt": "2026-11-20T10:51:01Z",
+      "mandateHash": "7c8659491ea914018cf68eae9b6df6176d351eb9744028dcec6cc55e81f5cc14",
+      "customId": "7c8659491ea914018cf68eae9b6df6176d351eb9744028dcec6cc55e81f5cc14"
+    },
+    {
+      "label": "bot-3",
+      "ok": true,
+      "orderId": "5MH158086G011021F",
+      "orderStatus": "COMPLETED",
+      "authorizationId": "82C58801S8168605E",
+      "authorizationStatus": "CREATED",
+      "expiresAt": "2026-11-20T10:51:04Z",
+      "mandateHash": "721df417eeee2844c9385fcec33b0542357b26e5f2f316d30e998484244f336a",
+      "customId": "721df417eeee2844c9385fcec33b0542357b26e5f2f316d30e998484244f336a"
+    },
+    {
+      "label": "bot-1 capture",
+      "ok": true,
+      "captureId": "61P384428C347241W",
+      "captureStatus": "COMPLETED"
+    },
+    {
+      "label": "bot-2 void",
+      "ok": true,
+      "authorizationId": "8XL4147766030574P",
+      "authorizationStatus": "VOIDED"
+    }
+  ]
+}

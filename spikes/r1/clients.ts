@@ -1,6 +1,7 @@
 import { PaypalClient } from "paypal";
 import { z } from "zod";
 import { parseEnv, SANDBOX_BASE_URL } from "../../src/config/env.ts";
+import { normalizeExpiry } from "../r2/card.ts";
 
 // R1 spike only. Production client construction moves to src/paypal/client.ts in S2.4.
 // Two REST apps: the co-op (our coordinator) and the supplier (used here only to check where money landed).
@@ -16,7 +17,7 @@ export const r1EnvSchema = z.object({
   SUPPLIER_PAYPAL_CLIENT_SECRET: nonEmpty,
   // PayPal's sandbox card generator (developer dashboard → Testing tools). Test values only.
   SANDBOX_CARD_NUMBER: nonEmpty,
-  SANDBOX_CARD_EXPIRY: z.string().regex(/^\d{4}-\d{2}$/),
+  SANDBOX_CARD_EXPIRY: z.string().refine((v) => normalizeExpiry(v) !== undefined),
   SANDBOX_CARD_CVV: z.string().regex(/^\d{3,4}$/),
 });
 
