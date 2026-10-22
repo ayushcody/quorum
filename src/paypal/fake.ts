@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { OpKind } from "../outbox/kinds.ts";
 import type { OpParams, PayPalPort, PortOutcome, PortRequest } from "./port.ts";
 
@@ -23,6 +24,8 @@ export class FakePayPal implements PayPalPort {
   private readonly orders = new Map<string, Order>();
   private readonly captures = new Map<string, Capture>();
   private seq = 0;
+  // PayPal ids are globally unique; a per-instance tag keeps fakes in one test database from colliding.
+  private readonly tag = randomBytes(3).toString("hex").toUpperCase();
 
   failNext(kind: OpKind, fault: FakeFault): void {
     this.faults.set(kind, [...(this.faults.get(kind) ?? []), fault]);
@@ -55,7 +58,7 @@ export class FakePayPal implements PayPalPort {
 
   private id(prefix: string): string {
     this.seq += 1;
-    return `${prefix}-${this.seq}`;
+    return `${prefix}-${this.tag}${this.seq}`;
   }
 
   private authBody(id: string, a: Auth) {

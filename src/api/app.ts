@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import type { Log } from "../log.ts";
+import { pledgeRoutes } from "../pledge/routes.ts";
+import type { PledgeDeps } from "../pledge/service.ts";
 import { verifyWebhookSignature, type GetPublicKey, type WebhookHeaders } from "../webhooks/verify.ts";
 
 export type AppDeps = {
@@ -8,6 +10,8 @@ export type AppDeps = {
   getPublicKey: GetPublicKey;
   pingDb?: () => Promise<void>;
   log: Log;
+  // Pledge API (S2.5); absent when no database is configured.
+  pledges?: PledgeDeps & { paypalClientId: string };
 };
 
 const SIGNATURE_HEADERS = [
@@ -63,6 +67,9 @@ export function createApp(deps: AppDeps): Hono {
     });
     return c.json({ received: true });
   });
+
+  if (deps.pledges) app.route("/", pledgeRoutes(deps.pledges));
+  else app.all("/api/*", (c) => c.json({ error: "database not configured" }, 503));
 
   return app;
 }

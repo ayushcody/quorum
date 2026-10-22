@@ -128,11 +128,13 @@ function toBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function fromBase64Url(text: string): Uint8Array | undefined {
+function fromBase64Url(text: string): Uint8Array<ArrayBuffer> | undefined {
   if (!/^[A-Za-z0-9_-]+$/.test(text)) return undefined;
   try {
     const binary = atob(text.replace(/-/g, "+").replace(/_/g, "/"));
-    return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
   } catch {
     return undefined;
   }

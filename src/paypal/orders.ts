@@ -15,7 +15,12 @@ export function ordersHandlers(client: PaypalClient, opts: { cardSource?: CardSo
       const p = req.params as OpParams["create_order"];
       if (p.funding === "demo_card" && !opts.cardSource) return configFailure("DEMO_CARD_UNCONFIGURED");
       // Demo bots only (D4): the card comes from the injected source at send time, never from the op row.
-      const card = p.funding === "demo_card" ? opts.cardSource!() : undefined;
+      let card: ReturnType<CardSource> | undefined;
+      try {
+        card = p.funding === "demo_card" ? opts.cardSource!() : undefined;
+      } catch {
+        return configFailure("DEMO_CARD_UNCONFIGURED");
+      }
       return toPortOutcome(() =>
         client.orders.createOrder({
           payPalRequestId: req.requestId,

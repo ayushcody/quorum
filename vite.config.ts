@@ -6,6 +6,8 @@ export default defineConfig({
   root: "web",
   envDir: "..",
   plugins: [react()],
-  server: { port: 5173, strictPort: true },
-  build: { outDir: "../dist/web", emptyOutDir: true },
+  // In dev the API runs separately (`pnpm dev:api`, port 3000); the browser stays same-origin via the proxy.
+  server: { port: 5173, strictPort: true, proxy: { "/api": "http://localhost:3000", "/health": "http://localhost:3000" } },
+  // The manifest lets scripts/check-bundle.ts prove the pledge page ships without AG Studio or Bryntum.
+  build: { outDir: "../dist/web", emptyOutDir: true, manifest: true },
 });

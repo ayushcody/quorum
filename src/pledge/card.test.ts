@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadSandboxCard, normalizeExpiry } from "../../spikes/r2/card.ts";
+import { loadSandboxCard, normalizeExpiry } from "./card.ts";
 
 describe("normalizeExpiry", () => {
   it("accepts PayPal's YYYY-MM as is", () => {
