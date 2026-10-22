@@ -288,7 +288,7 @@ Today (S1.4) the route verifies and logs ids only, returning 200 / 400 (bad sign
 
 ## 6. Data model (schema `public`, Drizzle)
 
-Conventions: `id uuid pk default gen_random_uuid()`, `created_at timestamptz not null default now()`, money `*_cents bigint not null check (>= 0)`, `currency char(3) not null check (currency='USD')`. No soft deletes. FKs are indexed.
+Implemented in `src/db/schema.ts` (Drizzle; migrations in `src/db/migrations`, applied by `pnpm db:migrate`). Every fixed vocabulary (round, pledge, authorization and op states, funding, op kinds) is a CHECK constraint. Conventions: `id uuid pk default gen_random_uuid()`, `created_at timestamptz not null default now()`, money `*_cents bigint not null check (>= 0)`, `currency char(3) not null check (currency='USD')`. No soft deletes. FKs are indexed.
 
 **members**: `id`, `display_name text`, `business_name text`, `kind text check in ('human','bot')`, `public_key_jwk jsonb not null` (P-256), `created_at`.
 
@@ -306,7 +306,9 @@ Conventions: `id uuid pk default gen_random_uuid()`, `created_at timestamptz not
 
 **webhook_events** (inbox): `id`, `paypal_event_id text unique not null`, `event_type text`, `resource_id text`, `payload jsonb`, `verified bool not null`, `received_at`, `processed_at null`, `error text null`.
 
-**audit_log** (append-only; no UPDATE/DELETE grants for the app role): `id bigserial`, `round_id fk null`, `actor text` (`policy|worker|webhook|agent:intake|agent:narrator|member:{id}|supplier`), `action text`, `data jsonb`, `created_at`. Index `(round_id, id)`.
+**audit_log** (append-only: a trigger, migration `0001_audit_log_append_only`, refuses UPDATE, DELETE and TRUNCATE for every role): `id bigserial`, `round_id fk null`, `actor text` (`policy|worker|webhook|agent:intake|agent:narrator|member:{id}|supplier`), `action text`, `data jsonb`, `created_at`. Index `(round_id, id)`.
+
+**demo_signing_keys** (S2.1): `member_id pk fk members`, `private_key_jwk jsonb`, `created_at`. Server-held P-256 private keys for **demo bot members only** (D4), written once by `pnpm seed:demo`. Human members' keys never leave their browser.
 
 **fulfillments**: `id`, `round_id fk unique`, `paypal_invoice_id text null`, `invoice_amount_cents bigint null`, `invoice_status text null`, `payout_batch_id text null`, `payout_item_id text null`, `payout_status text null`, `carrier text null`, `tracking_number text null`, `reported_at`. Written from the supplier's signed `invoice_issued` / `fulfillment` messages and the coordinator's own payout op (§3.4). The coordinator never calls Invoicing itself.
 

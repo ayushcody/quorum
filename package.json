@@ -19,13 +19,17 @@
     "start:worker": "node --import tsx src/worker/main.ts",
     "dev:api": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
     "db:up": "docker start quorum-pg 2>/dev/null || docker run -d --name quorum-pg -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:17",
-    "db:down": "docker stop quorum-pg"
+    "db:down": "docker stop quorum-pg",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
+    "seed:demo": "node --env-file-if-exists=.env --import tsx scripts/seed-demo.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/react": "19.2.8",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.1.2",
+    "drizzle-kit": "0.31.11",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "vite": "8.3.5",
@@ -37,6 +41,7 @@
     "@hono/node-server": "2.1.5",
     "ag-studio": "3.0.0",
     "ag-studio-react": "3.0.0",
+    "drizzle-orm": "0.45.4",
     "hono": "4.13.13",
     "paypal": "github:context-plugins/paypal-typescript-sdk#5d0df8a8817e5fdf2e2cd48e68f790ea4730aab2",
     "postgres": "3.4.9",
