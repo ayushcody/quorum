@@ -66,18 +66,25 @@ Spike code lives in `spikes/` and is throwaway. Its value is the sandbox test an
 
 ## Phase 3 — Agents (Days 8–11, Oct 29–Nov 1)
 
+**How Phase 3 runs**
+- **The negotiator follows the OG-Narrator split** (ARCHITECTURE §4). The concession schedule, the coalition limit L and the accept rule are pure functions in `src/policy/`. The LLM only writes messages and classifies the supplier's intent (`final_offer | counter | stall | other`). Neither can change a price.
+- **Model per slice** (pick it in the model picker; `/clear` between slices):
+  - **Opus** designs and builds the negotiator: S3.1 (concession + accept), S3.3 (orchestrator), S3.4 (both narrators and the public-facts prompt builder), S3.5 (injection resistance). The test-writer subagent writes the failing tests first on S3.1 and S3.5.
+  - **Sonnet**: S3.2 (supplier service), S3.6 (intake agent), S3.7 (supplier fulfillment), S3.8 (Channel3 client).
+- **Red-team daily from D9 PM**, once S3.3 and S3.4 exist. Before that, the agent only reports "not built yet". Run the `injection-redteam` subagent at the end of each day and fix every FAIL before the next slice. Record each run's score in BUILD-LOG.
+
 | ID | When | Slice | Files to create | Proving test | Demo-visible? |
 |---|---|---|---|---|---|
 | S3.1 | D8 AM | Concession engine + accept rule; coalition limit re-computed as pledges change | `src/policy/{concession,accept}.ts` + tests | fast-check: bid monotone, `≤ L`, accepts only `p ≤ L`. Walks at k=N if `p > L`. Adding a pledge never lowers L (invariant 8 + L monotonicity) | No |
 | S3.2 | D8 PM | Supplier service skeleton: own entrypoint, env, DB schema, HMAC protocol, deterministic strategy (no LLM yet) | `src/protocol/{messages,hmac}.ts`, `src/supplier/{main,env,db,strategy}.ts` + tests, Render service in `render.yaml` | Contract test: signed offer → counter. Bad HMAC → 401. Replayed nonce → 409. Boundary rule 6 | No |
 | S3.3 | D9 AM | Negotiation orchestrator in the worker: ticks, turns, re-quote on quantity change, accept → lock → settle | `src/negotiation/{orchestrator,supplier-client}.ts` + tests | Integration with a stub narrator and an in-process supplier: given seed pledges and a supplier floor, it converges in ≤ 6 turns to the expected price. A new pledge mid-negotiation changes the next bid. Accept → round `locked` → `settling` | **Yes** (price drops live) |
 | S3.4 | D9 PM | LLM narrators, buyer and supplier (Claude Sonnet 5.5), public-facts prompt builder, intent label | `src/agents/prompts.ts`, `src/negotiation/narrator.ts`, `src/supplier/narrator.ts` + tests | Property test: random sentinels in private fields never appear in serialized prompts. AI SDK mock model: narrator output is never parsed for numbers. Boundary rules 4 and 7 | **Yes** |
-| S3.5 | D10 AM | Injection resistance + supplier red-team mode | `src/supplier/redteam.ts`, `test/integration/injection.test.ts`, `test/fixtures/injections/*.txt` | ≥ 10 injection fixtures plus fast-check random text: policy verdicts identical with and without the text (invariant 9). Red-team "$19/kg" offer → `reject` with reason `above_coalition_limit` in turns | **Yes** (on-camera refusal) |
+| S3.5 | D10 AM | Injection resistance + supplier red-team mode | `src/supplier/redteam.ts`, `test/integration/injection.test.ts`, `test/fixtures/injections/*.txt` | The 10 `injection-redteam` cases as fixtures (ignore-instructions, role spoof, fake quorum, fake final offer, currency switch, unit switch, unicode tricks, text/structured mismatch, edge values, limit-leak attempt) plus fast-check random text: policy verdicts identical with and without the text (invariant 9). Red-team "$19/kg" offer → `reject` with reason `above_coalition_limit` in turns | **Yes** (on-camera refusal) |
 | S3.6 | D10 PM | Intake agent: one sentence → pledge draft → member confirms → sign | `src/agents/intake.ts`, `web/src/routes/Round.tsx` (intake panel) + tests, `test/llm/intake.llm.test.ts` | Mock model: structured output validated by zod; out-of-range qty or price rejected, not clamped. `pnpm test:llm`: 10 phrasings → correct fields ≥ 9/10 | **Yes** |
 | S3.7 🅿 | D11 AM | Supplier fulfillment via Agent Toolkit (allowlist: invoice create/send/record-payment, tracking add) | `src/supplier/fulfillment.ts` + tests | Allowlist test: the toolkit is configured with exactly the listed tools, and any other tool name throws. Sandbox test: `round_settled` → invoice exists and is marked paid, tracking attached. Boundary rule 5 | **Yes** |
 | S3.8 | D11 PM | Channel3 benchmark (cached + fixture fallback) + seeded failure round | `src/benchmark/channel3.ts` + test, `test/fixtures/channel3/*.json`, `scripts/seed-demo.ts` (failure scenario) | Recorded-fixture test maps a response to `best_unit_price_cents`; API error → falls back to cache. `smoke --scenario=no-deal` → `voided` with reason `no_deal` | **Yes** (savings %) |
 
-**Exit:** `pnpm smoke --scenario=full` on Render: 3 bots + 1 live pledge → negotiated price → captures → invoice + tracking. `--scenario=redteam` shows the refusal in turns. `--scenario=no-deal` voids.
+**Exit:** `pnpm smoke --scenario=full` on Render: 3 bots + 1 live pledge → negotiated price → captures → invoice + tracking. `--scenario=redteam` shows the refusal in turns. `--scenario=no-deal` voids. **`injection-redteam` scores 10/10 refused**: no proposed capture price above L, no non-USD or non-integer offer accepted, and L never appears in any prompt or narrator output.
 
 ## Phase 4 — Sponsor surfaces (Days 12–15, Nov 2–5)
 
