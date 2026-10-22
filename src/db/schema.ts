@@ -16,8 +16,10 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { AUTHORIZATION_STATES, PLEDGE_STATES, ROUND_STATES } from "../policy/state.ts";
 
-// Coordinator schema (ARCHITECTURE §6). Money is integer cents in bigint, currency is USD only, and
+// Coordinator schema (ARCHITECTURE §6). State vocabularies come from src/policy/state.ts, so the
+// CHECK constraints and the policy kernel can't drift apart. Money is integer cents in bigint, currency is USD only, and
 // the invariants a bug could break (capture ≤ authorized, one op per business key, one event per
 // PayPal id, legal states only) are database constraints, not just app checks.
 
@@ -32,15 +34,6 @@ const ts = (name: string) => timestamp(name, { withTimezone: true });
 const oneOf = (column: AnyPgColumn, values: readonly string[]): SQL =>
   sql`${column} in (${sql.raw(values.map((v) => `'${v.replace(/'/g, "''")}'`).join(", "))})`;
 
-export const ROUND_STATES = [
-  "draft", "open", "locked", "settling", "settled", "invoiced", "paid_out", "fulfilled",
-  "voiding", "voided", "unwinding", "failed",
-] as const;
-export const PLEDGE_STATES = [
-  "order_pending", "order_created", "authorized", "reauthorizing", "capture_pending", "captured",
-  "void_pending", "voided", "refund_pending", "refunded", "abandoned",
-] as const;
-export const AUTHORIZATION_STATES = ["created", "captured", "voided", "expired", "denied", "reauthorized"] as const;
 // demo_card only on is_demo rounds (DECISIONS D4); enforced by the pledge service (S2.5).
 export const FUNDING_KINDS = ["paypal_wallet", "demo_card"] as const;
 export const OP_KINDS = [
