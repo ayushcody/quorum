@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import { authorizations, demoSigningKeys, mandates, members, pledges, rounds } from "../db/schema.ts";
@@ -198,18 +198,47 @@ export async function pledgeAsBot(
   return { ok: true, pledgeId: recorded.pledge.id, authorizationId: auth.id };
 }
 
+// Live progress counts authorized holds only: an order nobody approved isn't money in the round.
+async function progressOf(db: Db, roundIds: string[]): Promise<Map<string, { pledgedQty: number; members: number }>> {
+  const out = new Map(roundIds.map((id) => [id, { pledgedQty: 0, members: 0 }]));
+  if (roundIds.length === 0) return out;
+  const rows = await db
+    .select({ roundId: pledges.roundId, qtyMax: mandates.qtyMax })
+    .from(pledges)
+    .innerJoin(mandates, eq(mandates.id, pledges.mandateId))
+    .where(and(inArray(pledges.roundId, roundIds), eq(pledges.status, "authorized")));
+  for (const r of rows) {
+    const p = out.get(r.roundId)!;
+    p.pledgedQty += r.qtyMax;
+    p.members += 1;
+  }
+  return out;
+}
+
+const summaryOf = (round: typeof rounds.$inferSelect, progress: { pledgedQty: number; members: number }) => ({
+  id: round.id,
+  title: round.title,
+  sku: round.sku,
+  unit: round.unit,
+  targetQty: round.targetQty,
+  minMembers: round.minMembers,
+  status: round.status,
+  pledgeDeadlineAt: round.pledgeDeadlineAt.toISOString(),
+  deliveryBy: round.deliveryBy,
+  isDemo: round.isDemo,
+  progress,
+});
+
 export async function roundSummary(db: Db, roundId: string) {
   if (!UUID.test(roundId)) return undefined;
   const [round] = await db.select().from(rounds).where(eq(rounds.id, roundId));
   if (!round) return undefined;
-  return {
-    id: round.id,
-    title: round.title,
-    unit: round.unit,
-    targetQty: round.targetQty,
-    minMembers: round.minMembers,
-    status: round.status,
-    pledgeDeadlineAt: round.pledgeDeadlineAt.toISOString(),
-    isDemo: round.isDemo,
-  };
+  return summaryOf(round, (await progressOf(db, [round.id])).get(round.id)!);
+}
+
+// Rounds still taking pledges, soonest deadline first.
+export async function openRounds(db: Db, now: Date) {
+  const open = await db.select().from(rounds).where(and(eq(rounds.status, "open"), gt(rounds.pledgeDeadlineAt, now))).orderBy(asc(rounds.pledgeDeadlineAt));
+  const progress = await progressOf(db, open.map((r) => r.id));
+  return open.map((r) => summaryOf(r, progress.get(r.id)!));
 }

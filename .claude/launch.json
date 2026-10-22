@@ -10,8 +10,8 @@
     {
       "name": "api",
       "runtimeExecutable": "/usr/bin/env",
-      "runtimeArgs": ["DATABASE_URL=postgres://postgres:dev@localhost:5432/postgres", "corepack", "pnpm", "dev:api"],
-      "port": 3000
+      "runtimeArgs": ["PORT=3100", "DATABASE_URL=postgres://postgres:dev@localhost:5432/postgres", "corepack", "pnpm", "dev:api"],
+      "port": 3100
     }
   ]
 }

@@ -1,0 +1,485 @@
+/* Page layouts: home and pledge. Built on the tokens in styles.css. */
+
+/* ---- Home ------------------------------------------------------------------ */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 56px 0 40px;
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: -40% -20% auto auto;
+  width: 720px;
+  height: 720px;
+  background:
+    radial-gradient(closest-side, var(--brand-glow), transparent 70%),
+    radial-gradient(closest-side at 30% 70%, color-mix(in srgb, var(--crema) 30%, transparent), transparent 70%);
+  filter: blur(10px);
+  pointer-events: none;
+}
+
+.hero-grid {
+  position: relative;
+  display: grid;
+  gap: 40px;
+  align-items: center;
+}
+
+@media (min-width: 900px) {
+  .hero {
+    padding: 88px 0 64px;
+  }
+  .hero-grid {
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 56px;
+  }
+}
+
+.hero h1 {
+  font-size: clamp(40px, 6.4vw, 68px);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+}
+
+.hero h1 em {
+  font-style: normal;
+  background: linear-gradient(100deg, var(--brand) 10%, color-mix(in srgb, var(--brand) 40%, var(--crema)) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero .lede {
+  max-width: 34ch;
+  margin: 20px 0 28px;
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 28px;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.trust span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trust svg {
+  color: var(--ok);
+}
+
+.round-card {
+  padding: 24px;
+}
+
+.round-card .product {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.product-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: var(--crema-soft);
+  color: color-mix(in srgb, var(--crema) 75%, var(--ink));
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.stat {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.stat b {
+  display: block;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.stat small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.section {
+  padding: 48px 0;
+}
+
+.section h2 {
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  max-width: 22ch;
+}
+
+.steps {
+  display: grid;
+  gap: 16px;
+  margin-top: 28px;
+}
+
+@media (min-width: 820px) {
+  .steps {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.step {
+  padding: 24px;
+}
+
+.step .n {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: 800;
+}
+
+.step h3 {
+  font-size: 19px;
+  margin-bottom: 8px;
+}
+
+.step p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+/* ---- Pledge page ------------------------------------------------------------- */
+
+.pledge-layout {
+  display: grid;
+  gap: 24px;
+  padding-top: 28px;
+  padding-bottom: 8px;
+}
+
+.pledge-layout > * {
+  min-width: 0;
+}
+
+/* Phones: details, then the form, then the explainer. Desktop: form in a sticky right column. */
+.pledge-main {
+  grid-area: main;
+}
+.pledge-panel {
+  grid-area: panel;
+}
+.pledge-how {
+  grid-area: how;
+}
+.pledge-layout {
+  grid-template-areas: "main" "panel" "how";
+}
+
+@media (min-width: 960px) {
+  .pledge-layout {
+    grid-template-columns: 1fr 440px;
+    grid-template-areas: "main panel" "how panel";
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    gap: 32px;
+    padding-top: 44px;
+  }
+}
+
+@media (min-width: 960px) and (max-width: 1100px) {
+  .pledge-layout {
+    grid-template-columns: 1fr 400px;
+  }
+  .pledge-panel {
+    position: sticky;
+    top: 88px;
+  }
+}
+
+.round-head h1 {
+  font-size: clamp(28px, 4.4vw, 42px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  margin: 10px 0 12px;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.progress-card {
+  padding: 24px;
+}
+
+.progress-figures {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.progress-figures b {
+  font-size: 34px;
+  letter-spacing: -0.03em;
+}
+
+.members-dots {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  align-items: center;
+}
+
+.members-dots i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.members-dots i.on {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+
+.timeline li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 14px;
+  padding-bottom: 20px;
+}
+
+.timeline li:last-child {
+  padding-bottom: 0;
+}
+
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: 17px;
+  top: 36px;
+  bottom: 0;
+  width: 2px;
+  background: var(--line);
+}
+
+.timeline li:last-child::before {
+  display: none;
+}
+
+.timeline .dot {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.timeline h4 {
+  margin: 6px 0 2px;
+  font-size: 16px;
+}
+
+.timeline p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 15px;
+}
+
+.pledge-panel .card {
+  padding: 24px;
+}
+
+.panel-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.panel-title h2 {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.summary {
+  margin: 20px 0 16px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--brand-soft), color-mix(in srgb, var(--crema-soft) 70%, transparent));
+  border: 1px solid color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+.summary .hold {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary .hold b {
+  font-size: 30px;
+  letter-spacing: -0.03em;
+}
+
+.summary p {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.paypal-slot {
+  min-height: 52px;
+  border-radius: 999px;
+}
+
+.paypal-slot paypal-button {
+  display: block;
+  width: 100%;
+}
+
+.paypal-slot.loading {
+  background: linear-gradient(90deg, var(--surface-2), var(--line), var(--surface-2));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.fineprint {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+
+.status.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.success {
+  text-align: center;
+  padding: 32px 24px;
+}
+
+.success .tick {
+  display: inline-grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  margin-bottom: 16px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--ok-soft) 60%, transparent);
+}
+
+.success h2 {
+  font-size: 26px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.success dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 22px 0 0;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  text-align: left;
+  font-size: 14px;
+}
+
+.success dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.success dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}

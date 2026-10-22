@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { authorizePledge, registerMember, registerSchema, roundSummary, submitPledge, type PledgeDeps, type PledgeError } from "./service.ts";
+import { authorizePledge, openRounds, registerMember, registerSchema, roundSummary, submitPledge, type PledgeDeps, type PledgeError } from "./service.ts";
 
 export const SANDBOX_SDK_URL = "https://www.sandbox.paypal.com/web-sdk/v6/core";
 
@@ -27,6 +27,8 @@ export function pledgeRoutes(deps: PledgeDeps & { paypalClientId: string }): Hon
   const app = new Hono();
 
   app.get("/api/config", (c) => c.json({ paypalClientId: deps.paypalClientId, paypalSdkUrl: SANDBOX_SDK_URL }));
+
+  app.get("/api/rounds", async (c) => c.json({ rounds: await openRounds(deps.db, deps.now()) }));
 
   app.get("/api/rounds/:roundId", async (c) => {
     const round = await roundSummary(deps.db, c.req.param("roundId"));

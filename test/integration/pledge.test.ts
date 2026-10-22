@@ -201,3 +201,28 @@ describe("bot pledge (demo mode only, DECISIONS D4)", () => {
     expect(port.calls).toHaveLength(0);
   });
 });
+
+describe("round progress for the UI", () => {
+  it("counts only authorized pledges toward progress, and lists open rounds", async () => {
+    freshApp();
+    const round = await newRound();
+    const closed = await newRound({ status: "locked" });
+    const a = await newKeys();
+    const b = await newKeys();
+    const pledgeA = (await (await post(`/api/rounds/${round.id}/pledges`, await signedPledge(round.id, await register(a), a, { qtyMax: 30 }))).json()) as { pledgeId: string };
+    await post(`/api/rounds/${round.id}/pledges`, await signedPledge(round.id, await register(b), b, { qtyMax: 25 })); // order only, never authorized
+
+    const before = (await (await app.request(`/api/rounds/${round.id}`)).json()) as { progress: { pledgedQty: number; members: number } };
+    expect(before.progress).toEqual({ pledgedQty: 0, members: 0 });
+
+    await post(`/api/pledges/${pledgeA.pledgeId}/authorize`, {});
+    const after = (await (await app.request(`/api/rounds/${round.id}`)).json()) as { progress: { pledgedQty: number; members: number } };
+    expect(after.progress).toEqual({ pledgedQty: 30, members: 1 });
+
+    const list = (await (await app.request("/api/rounds")).json()) as { rounds: Array<{ id: string; progress: unknown }> };
+    const ids = list.rounds.map((r) => r.id);
+    expect(ids).toContain(round.id);
+    expect(ids).not.toContain(closed.id);
+    expect(list.rounds.find((r) => r.id === round.id)!.progress).toEqual({ pledgedQty: 30, members: 1 });
+  });
+});
