@@ -95,6 +95,20 @@ Phase 1 decision gate (docs/PLAN.md). Each decision cites the evidence in `docs/
 
 **Still unproven from R3**: the Studio Agent Framework hookup (a custom agent that talks to Studio's built-in agents). AG Studio's AI runs through `AgStudioAiModule` plus a model adapter, and the boilerplate's adapter is OpenAI-specific. Quorum is Claude-only, so S4.4 needs an Anthropic adapter behind a server proxy. That is S4.4's risk to retire first.
 
+## D6 · Webhook signatures are verified offline (2026-10-22)
+
+**Context.** The APIMatic SDK has no `verify-webhook-signature` call. CLAUDE.md requires a `PayPal-Request-Id` and an outbox row before every PayPal call, and the outbox does not exist until S2.4.
+
+**Decision.** `src/webhooks/verify.ts` implements PayPal's documented self-verification:
+- Signed message: `<paypal-transmission-id>|<paypal-transmission-time>|<PAYPAL_WEBHOOK_ID>|<crc32(raw body)>`, checked with SHA256withRSA against the public key in the cert at `paypal-cert-url`. CRC32 is `node:zlib`'s.
+- **`paypal-cert-url` is pinned** to `https://api.sandbox.paypal.com/v1/notifications/certs/` (https, no query or fragment). Anything else is rejected **before any fetch**, so an attacker can't supply their own cert. TLS to the pinned host authenticates the cert. The cert's validity window is checked, and its key is cached per URL.
+- `auth_algo` must be `SHA256withRSA`. The signature covers the **raw** body bytes, so the route reads `c.req.text()` before parsing.
+- Responses: `200` when verified (event id, type, resource id and transmission id are logged; never the payload, which carries payer details). `400` when verification fails (reason logged). `503` while `PAYPAL_WEBHOOK_ID` is unset, so PayPal retries.
+
+**Why not the postback API:** it would be one PayPal API call per webhook, needing an outbox row (not built yet) and rate limits, and making verification fail whenever PayPal's API is slow. The offline check needs only a cached cert. Fetching the static cert from the pinned host is not a PayPal API call, so CLAUDE.md's outbox rule doesn't apply to it.
+
+**Still to verify live:** unit tests use a locally generated key in the same format. The first real sandbox event after deploy must log `paypal_webhook` with `verified: true`, which confirms the message format against PayPal's real signing (Render steps in the S1.4 hand-off). Events from the dashboard's **Webhooks simulator** are not expected to verify against our webhook id; use real sandbox activity instead.
+
 ## Pending gate items
 
 | Item | Status |

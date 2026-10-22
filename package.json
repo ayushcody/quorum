@@ -14,7 +14,10 @@
     "test:sandbox": "vitest run --config vitest.sandbox.config.ts",
     "test:llm": "vitest run --config vitest.llm.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
-    "spike:authorize": "node --env-file=.env --import tsx scripts/spike-authorize.ts"
+    "spike:authorize": "node --env-file=.env --import tsx scripts/spike-authorize.ts",
+    "start:web": "node --import tsx src/server.ts",
+    "start:worker": "node --import tsx src/worker/main.ts",
+    "dev:api": "node --env-file-if-exists=.env --import tsx --watch src/server.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
@@ -29,9 +32,12 @@
   "dependencies": {
     "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.7",
     "@bryntum/schedulerpro-react": "7.3.7",
+    "@hono/node-server": "2.1.5",
     "ag-studio": "3.0.0",
     "ag-studio-react": "3.0.0",
+    "hono": "4.13.13",
     "paypal": "github:context-plugins/paypal-typescript-sdk#5d0df8a8817e5fdf2e2cd48e68f790ea4730aab2",
+    "postgres": "3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "zod": "^4.6.7"

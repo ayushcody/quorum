@@ -31,3 +31,34 @@ export function parseEnv<S extends z.ZodType>(schema: S, source: EnvSource): z.i
 export function loadCoordinatorEnv(source: EnvSource = process.env): CoordinatorEnv {
   return parseEnv(coordinatorSchema, source);
 }
+
+const optional = z.string().trim().min(1).optional().catch(undefined);
+
+// quorum-web. DATABASE_URL and PAYPAL_WEBHOOK_ID are optional at boot: the database is wired by
+// Render, and the webhook id only exists after the webhook is created with this service's URL.
+const webSchema = coordinatorSchema.extend({
+  PORT: z.coerce.number().int().positive().default(3000),
+  DATABASE_URL: optional,
+  PAYPAL_WEBHOOK_ID: optional,
+});
+
+const workerSchema = coordinatorSchema.extend({
+  DATABASE_URL: optional,
+});
+
+export type WebEnv = z.infer<typeof webSchema>;
+export type WorkerEnv = z.infer<typeof workerSchema>;
+
+export function loadWebEnv(source: EnvSource = process.env): WebEnv {
+  return parseEnv(webSchema, source);
+}
+
+export function loadWorkerEnv(source: EnvSource = process.env): WorkerEnv {
+  return parseEnv(workerSchema, source);
+}
+
+// Every key each process reads; test/env-docs.test.ts checks they are in .env.example and render.yaml.
+export const ENV_KEYS: { web: string[]; worker: string[] } = {
+  web: Object.keys(webSchema.shape),
+  worker: Object.keys(workerSchema.shape),
+};

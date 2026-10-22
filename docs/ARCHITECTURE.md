@@ -60,7 +60,7 @@ src/
     call.ts         paypalCall(op) — requires an outbox row; sets PayPal-Request-Id
     orders.ts       createOrder, authorizeOrder, getOrder, clientToken     (pledge/ may import)
     payments.ts     capture, void, reauthorize, refund, getAuthorization  (ONLY settlement/worker.ts may import)
-    webhooks.ts     verifyWebhookSignature
+    (webhook signature verification is offline, in src/webhooks/verify.ts; no PayPal API call, DECISIONS D6)
     port.ts         PayPalPort interface; fake.ts = in-memory test double
   outbox/       repo.ts (insert/claim/complete), request-id.ts (UUIDv5), reconcile.ts, errors.ts (classify)
   settlement/   worker.ts (the ONLY capture/void/reauth/refund caller), planner.ts (pure orchestration over a port)
@@ -125,7 +125,7 @@ sequenceDiagram
   PP-->>W: authorization id, status CREATED, expiration_time
   W->>DB: tx: op succeeded, authorization row (honor_ends_at = created+72h), pledge(authorized), audit
   PP--)W: webhook PAYMENT.AUTHORIZATION.CREATED
-  W->>PP: verify-webhook-signature (via paypalCall, Request-Id)
+  W->>W: verify signature offline: CRC32(raw body) + SHA256withRSA against PayPal's pinned sandbox cert (D6)
   W->>DB: inbox insert ON CONFLICT(event_id) DO NOTHING; reconcile (no-op if already authorized)
   W->>W: policy.evaluateRound(snapshot, now) → Wait (quorum not yet met)
   Note over K,S: negotiation runs in parallel (section 4); quantity grows as pledges land
@@ -208,7 +208,7 @@ Every PayPal call goes through `paypal/call.ts::paypalCall(opId)`, which loads t
 
 ### 5.2 Two execution modes, one table
 
-- **Inline ops** (`create_order`, `authorize_order`, `client_token`, `get_*`, `verify_webhook`): the request handler inserts the row (committed), calls, then updates the row. The browser flow needs the answer synchronously.
+- **Inline ops** (`create_order`, `authorize_order`, `client_token`, `get_*`): the request handler inserts the row (committed), calls, then updates the row. The browser flow needs the answer synchronously.
 - **Deferred ops** (`capture`, `void`, `reauthorize`, `refund`, `payout`): inserted by the settlement planner **in the same transaction** that moves the round to `settling`/`voiding`/`unwinding` (transactional outbox). Only `settlement/worker.ts` executes them.
 
 ### 5.3 Keys
@@ -224,7 +224,6 @@ Every PayPal call goes through `paypal/call.ts::paypalCall(opId)`, which loads t
 | reauthorize | `reauth:{paypalAuthorizationId}` |
 | refund | `refund:{paypalCaptureId}` |
 | payout (fallback) | `payout:{roundId}` |
-| verify_webhook | `verify:{transmissionId}` |
 | reads | `get:{resource}:{id}:{n}` (n = per-row counter; reads are safe to repeat) |
 
 `UNIQUE(business_key)` means a retried intent can never create a second op. Re-running the planner is a no-op (`INSERT … ON CONFLICT DO NOTHING`). Correctness never relies on PayPal's dedupe window. Before re-issuing any op whose outcome is unknown, we GET the resource and reconcile first.
@@ -246,7 +245,7 @@ pending ──claim──► in_flight ──2xx──► succeeded
 
 ### 5.5 Inbox (webhooks)
 
-`POST /webhooks/paypal` verifies the signature, inserts into `webhook_events` (`UNIQUE(paypal_event_id)`, `ON CONFLICT DO NOTHING`) and returns 200. Processing then reconciles domain state and calls `evaluateRound`. Webhooks **confirm** what our own API responses already recorded. They are not the primary trigger for our own actions, so a lost webhook degrades only latency (the reconcile sweep covers it), never correctness. Unverified events are stored with `verified=false` and never processed.
+`POST /webhooks/paypal` verifies the signature offline (DECISIONS D6: PayPal's documented CRC32 + SHA256withRSA check against the cert at `paypal-cert-url`, which is pinned to `https://api.sandbox.paypal.com/v1/notifications/certs/`), inserts into `webhook_events` (`UNIQUE(paypal_event_id)`, `ON CONFLICT DO NOTHING`) and returns 200. Processing then reconciles domain state and calls `evaluateRound`. Webhooks **confirm** what our own API responses already recorded. They are not the primary trigger for our own actions, so a lost webhook degrades only latency (the reconcile sweep covers it), never correctness. Unverified events are stored with `verified=false` and never processed.
 
 Subscribed: `PAYMENT.AUTHORIZATION.CREATED`, `PAYMENT.AUTHORIZATION.VOIDED`, `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.DENIED`, `PAYMENT.CAPTURE.PENDING`, `PAYMENT.CAPTURE.REFUNDED`, `CUSTOMER.DISPUTE.CREATED`.
 
