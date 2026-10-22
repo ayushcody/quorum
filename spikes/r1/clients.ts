@@ -26,8 +26,19 @@ export function loadR1Env(source: Record<string, string | undefined> = process.e
   return parseEnv(r1EnvSchema, source);
 }
 
-function sandboxClient(clientId: string, clientSecret: string): PaypalClient {
+// PayPal answers 415 to a POST with no Content-Type, and the SDK omits the header when a call has no
+// body (authorizeOrder without one, voidPayment always). `fetch` is the SDK's only transport seam.
+const withJsonContentType: typeof fetch = (input, init) => {
+  const request = new Request(input, init);
+  if (request.method === "GET" || request.headers.has("content-type")) return fetch(request);
+  const headers = new Headers(request.headers);
+  headers.set("content-type", "application/json");
+  return fetch(new Request(request, { headers }));
+};
+
+export function sandboxClient(clientId: string, clientSecret: string): PaypalClient {
   return new PaypalClient({
+    fetch: withJsonContentType,
     serverOptions: { baseUrl: SANDBOX_BASE_URL },
     oauth2: { clientId, clientSecret },
   });

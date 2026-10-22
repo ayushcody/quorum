@@ -7,7 +7,7 @@ Sandbox only. All values go in `.env` (gitignored), never in code.
    - `quorum-coop` — **Business**, country **US**. This is the coordinator / merchant of record.
    - `quorum-supplier` — **Business**, country **US**. The supplier (third-party payee).
    - `member-1` … `member-4` — **Personal**, country **US**. Human approvals in the PayPal popup.
-2. **Supplier merchant ID**: Sandbox Accounts → `quorum-supplier` → View/Edit → *Account ID* → `SUPPLIER_MERCHANT_ID`.
+2. **Supplier identity**: Sandbox Accounts → `quorum-supplier` → View/Edit → *Account ID* → `SUPPLIER_MERCHANT_ID`, and its email → `SUPPLIER_SANDBOX_EMAIL`.
 3. **Apps & Credentials (Sandbox) → Create App**:
    - App `quorum-coordinator`, linked to `quorum-coop` → `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`.
    - App `quorum-supplier`, linked to `quorum-supplier` → `SUPPLIER_PAYPAL_CLIENT_ID`, `SUPPLIER_PAYPAL_CLIENT_SECRET`.
@@ -19,7 +19,15 @@ Sandbox only. All values go in `.env` (gitignored), never in code.
    corepack pnpm test:sandbox
    ```
 
-   Findings are written to `spikes/r1/results.json`. Then run the manual wallet variant
+   Findings are written to `spikes/r1/results.json`. Spike 1 (wallet-funded, payee by email) needs only
+   `PAYPAL_*` + `SUPPLIER_SANDBOX_EMAIL`. It prints three approve links, waits until all three are approved
+   as `member-1`, then captures, voids and reauthorizes, and appends the results to `docs/BUILD-LOG.md`:
+
+   ```bash
+   corepack pnpm spike:authorize
+   ```
+
+   Optional manual wallet variant with payee by merchant ID
    (approve as `member-1` in the browser):
 
    ```bash

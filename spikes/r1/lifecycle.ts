@@ -12,11 +12,9 @@ export type Outcome<T> = { ok: true; status: number; value: T } | Failure;
 
 function toOutcome<T>(result: ApiResult<T, any>): Outcome<T> {
   if (result.ok) return { ok: true, status: result.status, value: result.value };
-  const payload = result.payload as {
-    name?: string;
-    debugId?: string;
-    details?: Array<{ issue?: string }>;
-  };
+  // Typed error arms carry PayPal's error model under `body` (seen live in R1: { kind, body: { name, … } }).
+  type PayPalErrorBody = { name?: string; debugId?: string; details?: Array<{ issue?: string }> };
+  const payload = ((result.payload as { body?: PayPalErrorBody }).body ?? {}) as PayPalErrorBody;
   return {
     ok: false,
     status: result.status,
@@ -33,6 +31,7 @@ export type Funding = { kind: "card"; env: R1Env } | { kind: "wallet" };
 export type CreateArgs = {
   amountCents: number;
   payeeMerchantId?: string;
+  payeeEmail?: string;
   customId: string;
   invoiceId: string;
   funding: Funding;
@@ -65,7 +64,11 @@ export async function createAuthorizeOrder(client: PaypalClient, args: CreateArg
         purchaseUnits: [
           {
             amount: { currencyCode: "USD", value: cents(args.amountCents) },
-            ...(args.payeeMerchantId ? { payee: { merchantId: args.payeeMerchantId } } : {}),
+            ...(args.payeeMerchantId
+              ? { payee: { merchantId: args.payeeMerchantId } }
+              : args.payeeEmail
+                ? { payee: { emailAddress: args.payeeEmail } }
+                : {}),
             customId: args.customId,
             invoiceId: args.invoiceId,
           },

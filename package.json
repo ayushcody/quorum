@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:sandbox": "vitest run --config vitest.sandbox.config.ts",
     "test:llm": "vitest run --config vitest.llm.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "spike:authorize": "node --env-file=.env --import tsx scripts/spike-authorize.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

@@ -52,7 +52,7 @@ Spike code lives in `spikes/` and is throwaway. Its value is the sandbox test an
 | S2.6 🅿 | D6 PM | Webhook inbox: verify, dedupe, reconcile, `evaluateRound`, audit | `src/webhooks/{routes,handlers}.ts` + tests, `test/fixtures/webhooks/*.json` | Same event twice → one transition. Bad signature → stored with `verified=false`, not processed. AUTHORIZATION.CREATED for an already-authorized pledge → no-op | Yes (webhook log in cockpit later) |
 | S2.7 🅿 | D7 AM | Settlement worker: preflight, capture-all, void-all, reauth-before-settle, unwind (refund + void), tick loop | `src/settlement/{worker,planner}.ts`, `src/worker/main.ts` + tests | Fake-port scenarios: happy path; one capture fails after 2 succeed → Unwind refunds 2, voids rest; honor window near → reauth then capture new id; worker killed mid-batch → restart, no duplicate capture. Boundary rule 3 | **Yes** (captures and voids) |
 | S2.8 🅿 | D7 PM | Fixed-price round end-to-end on Render (no negotiation yet) + plain audit page | `src/api/{cockpit,sse}.ts`, `web/src/routes/Audit.tsx`, `scripts/smoke.ts`, `render.yaml` (web + worker + db) | `pnpm smoke --target=$RENDER_URL --scenario=fixed`: 3 bots + quorum → `settled` and captures visible via GET. `--scenario=no-quorum` → `voided` | **Yes** |
-| S2.9 🅿 | Only if R1 failed: D7 PM. S2.8 then moves to D8 AM, S3.1 + S3.2 share D8 PM, and S4.6 is cut to recover | `coop_merchant` mode: orders without payee, Payouts to supplier after settle | `src/settlement/payout.ts`, tests | Fake port: `settled` → exactly one `payout:{roundId}` op. Sandbox: payout lands in the supplier account | Yes |
+| S2.9 🅿 | **Required (D1, R1 failed for direct payee):** D7 PM. S2.8 moves to D8 AM, S3.1 + S3.2 share D8 PM, and S4.6 is cut to recover | `coop_merchant` mode: orders without payee, Payouts to supplier after settle | `src/settlement/payout.ts`, tests | Fake port: `settled` → exactly one `payout:{roundId}` op. Sandbox: payout lands in the supplier account | Yes |
 
 **Exit:** a real sandbox round settles and a no-quorum round voids, both on Render, driven by `scripts/smoke.ts`.
 
@@ -119,7 +119,7 @@ Cut from the top: S4.6 supplier console → S3.8 Channel3 (use the fixture only)
 
 | Date | Decision | Outcome |
 |---|---|---|
-| D3 | PAYEE_MODE | _pending R1_ |
+| D1 (Oct 22) | PAYEE_MODE | **`coop_merchant`**: direct-payee void → 403 PERMISSION_DENIED; co-op-merchant capture + void work; reauth too soon → 422 (DECISIONS.md D1–D3) |
 | D3 | Bot authorization mode | _pending R2_ |
 | D3 | Studio + Bryntum layout | _pending R3_ |
 | D3 | Supplier DB role on Render | _pending S1.4_ |
