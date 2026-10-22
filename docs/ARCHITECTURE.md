@@ -200,6 +200,7 @@ Orders carry **no `payee`**. The co-op's sandbox business account is merchant of
 **Verified**
 - **Payee (R1, D1):** with a third-party payee, authorize + partial capture work but **void is refused** (403 `NOT_AUTHORIZED` / `PERMISSION_DENIED`). With no payee (co-op is merchant), authorize, partial capture (`final_capture: true` releases the remainder; authorization → CAPTURED) and void all work.
 - **Bots (R2, D4):** card-funded AUTHORIZE orders come back COMPLETED in one call with the authorization inline. Partial capture and void work on them too.
+- **Request-Id dedupe on capture (S2.4, 2026-10-22):** the same capture sent twice with one `PayPal-Request-Id` returned the same capture id (`4VS924551F678250D` on authorization `5BU640145V799743S`), and the authorization was CAPTURED once. A fresh Request-Id on the same authorization → 422 `AUTHORIZATION_ALREADY_CAPTURED`, which the outbox classifies as "check, then decide" and reconciles by GET.
 - **Payouts (S1.5, D1):** a co-op → supplier payout reaches SUCCESS in about 25 s. Dedupe is by `sender_batch_id` (§3.4).
 - **SDK (D3):** the APIMatic `paypal` package covers Orders and Payments with `payPalRequestId` on every write. It omits `Content-Type` on body-less POSTs (PayPal answers 415), so `src/paypal/client.ts` gets a fetch wrapper. Typed error arms nest PayPal's error under `payload.body`. `Prefer` defaults to `return=minimal`, so we send `return=representation`.
 - **Frontend (R3, D5):** AG Studio 3.0.0 and Bryntum Scheduler Pro 7.3.7 render on one route of one Vite app. Bryntum has no runtime licence key. AG Studio's missing key is a console error until `VITE_AG_STUDIO_LICENSE_KEY` is set.
@@ -210,7 +211,6 @@ Orders carry **no `payee`**. The co-op's sandbox business account is merchant of
 - A webhook PayPal actually signed passing our offline verification (needs the Render deploy, D6).
 - The JS SDK v6 client-token + popup approval path. Human approvals so far used the approve link.
 - A **successful** reauthorize (only after the honor period; bot-3's authorization `82C58801S8168605E` is eligible after 2026-10-25T10:51Z). Also unknown: whether reauth works on card authorizations, and whether it is limited to once.
-- `PayPal-Request-Id` dedupe on Orders/Payments writes (never run live; the design doesn't depend on it, §5.3).
 - The Studio Agent Framework hookup (S4.4, starting with an Anthropic adapter).
 
 ### 3.6 Authorization windows

@@ -16,6 +16,7 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { OP_KINDS, OP_STATES, type OpKind, type OpState } from "../outbox/kinds.ts";
 import { AUTHORIZATION_STATES, PLEDGE_STATES, ROUND_STATES } from "../policy/state.ts";
 
 // Coordinator schema (ARCHITECTURE §6). State vocabularies come from src/policy/state.ts, so the
@@ -36,12 +37,6 @@ const oneOf = (column: AnyPgColumn, values: readonly string[]): SQL =>
 
 // demo_card only on is_demo rounds (DECISIONS D4); enforced by the pledge service (S2.5).
 export const FUNDING_KINDS = ["paypal_wallet", "demo_card"] as const;
-export const OP_KINDS = [
-  "create_order", "authorize_order", "client_token", "get_order", "get_authorization", "get_capture",
-  "capture", "void", "reauthorize", "refund", "payout", "get_payout",
-] as const;
-export const OP_STATES = ["pending", "in_flight", "succeeded", "failed_retryable", "failed_terminal", "unknown"] as const;
-
 export const members = pgTable(
   "members",
   {
@@ -209,12 +204,12 @@ export const paypalOps = pgTable(
     id: id(),
     businessKey: text("business_key").notNull().unique(),
     requestId: uuid("request_id").notNull().unique(),
-    kind: text("kind").notNull(),
-    mode: text("mode").notNull(),
+    kind: text("kind").$type<OpKind>().notNull(),
+    mode: text("mode").$type<"inline" | "deferred">().notNull(),
     roundId: uuid("round_id").references(() => rounds.id),
     pledgeId: uuid("pledge_id").references(() => pledges.id),
     request: jsonb("request").notNull(),
-    status: text("status").notNull().default("pending"),
+    status: text("status").$type<OpState>().notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: ts("next_attempt_at").notNull().defaultNow(),
     lockedUntil: ts("locked_until"),

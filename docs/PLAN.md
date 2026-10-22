@@ -51,7 +51,7 @@ Spike code lives in `spikes/` and is throwaway. Its value is the sandbox test an
 | First Render deploy (Blueprint), live `/health` with `db: ok`, webhook created, `PAYPAL_WEBHOOK_ID` set | user (dashboard steps from S1.4) | before S2.8 | a real sandbox event logs `paypal_webhook` with `verified: true` (D6) |
 | JS SDK v6 client token + one human popup approval → `authorizeOrder` | S2.5, first task | D6 AM | a v6-approved order authorizes in the sandbox |
 | A **successful** reauthorize | S2.7 | on/after 2026-10-25T10:51Z | `82C58801S8168605E` (bot-3) reauthorizes; the new id captures or voids |
-| `PayPal-Request-Id` dedupe on Orders/Payments writes, live | S2.4 | D5 PM | the same capture sent twice with one Request-Id returns one capture id |
+| `PayPal-Request-Id` dedupe on Orders/Payments writes, live | S2.4 | D5 PM | **done 2026-10-22**: same capture id `4VS924551F678250D` for both sends; authorization captured once |
 | Studio Agent Framework hookup | S4.4, first task | D14 | Anthropic adapter behind a server proxy answers in Studio |
 
 Closed in Phase 1 with no carry-over: payee mode (D1), reauth timing (D2), SDK quirks (D3), bot cards (D4), Studio + Bryntum coexistence (D5), webhook verification design (D6), Payouts enabled on the co-op account (S1.5, D1), supplier DB isolation design (D7).
