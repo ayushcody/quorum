@@ -3,7 +3,7 @@
 Window: **Day 1 = Thu Oct 22 → Day 22 = Thu Nov 12 (deadline 12:00 PST)**. Submit on **Day 20 (Tue Nov 10)**.
 Design reference: `docs/ARCHITECTURE.md`. Product intent: `docs/STRATEGY.md`.
 
-**Current phase: Phase 1 — Risky spikes.** Build only slices in the current phase. Advance this line only when the phase's exit criteria are met.
+**Current phase: Phase 2 — Payment backbone** (Phase 1 closed 2026-10-22, on D1 instead of D3; see "Phase 1 close-out" below). Build only slices in the current phase. Advance this line only when the phase's exit criteria are met. The ~2 days gained are banked as buffer in Phase 6, not spent on new scope.
 
 ## Ground rules (from CLAUDE.md, applied to every slice)
 
@@ -13,6 +13,8 @@ Design reference: `docs/ARCHITECTURE.md`. Product intent: `docs/STRATEGY.md`.
 - **Demo-visible?** means it appears in the video or in judge mode. "No" slices are still required.
 - Test tiers: `pnpm test` (unit, property, integration against a local Postgres, and a fake PayPal port; no network). `pnpm test:sandbox` (live PayPal sandbox, opt-in). `pnpm test:llm` (live Claude evals, opt-in). The two opt-in scripts are added in S1.0.
 - Each new dependency's reason goes in its commit message (see ARCHITECTURE §8).
+- Run `pnpm db:up` (Docker Postgres 17, `quorum-pg`) before `pnpm test`. From S2.1 on, DB-backed integration tests are part of `pnpm test`, so DB code never runs for the first time on Render.
+- **A slice's proving test must state a money or safety invariant.** Config plumbing gets at most one test. Spike-only tests are deleted when the spike code is retired (end of Phase 2).
 
 ## Top 3 riskiest assumptions → Phase 1 spikes
 
@@ -40,6 +42,20 @@ Spike code lives in `spikes/` and is throwaway. Its value is the sandbox test an
 
 **Exit criteria / decision gate (end of D3):** R1–R3 each marked confirmed or fallback chosen in `docs/DECISIONS.md`. ARCHITECTURE §3.5 updated with verified facts. If more than one fallback is triggered, cut a stretch item and re-sequence Phase 2 before starting it.
 
+## Phase 1 close-out (2026-10-22)
+
+**Phase 1 carry-overs.** Each item is something Phase 1 didn't prove, with an owner and a slice:
+
+| Item | Owner | When | Done when |
+|---|---|---|---|
+| First Render deploy (Blueprint), live `/health` with `db: ok`, webhook created, `PAYPAL_WEBHOOK_ID` set | user (dashboard steps from S1.4) | before S2.8 | a real sandbox event logs `paypal_webhook` with `verified: true` (D6) |
+| JS SDK v6 client token + one human popup approval → `authorizeOrder` | S2.5, first task | D6 AM | a v6-approved order authorizes in the sandbox |
+| A **successful** reauthorize | S2.7 | on/after 2026-10-25T10:51Z | `82C58801S8168605E` (bot-3) reauthorizes; the new id captures or voids |
+| `PayPal-Request-Id` dedupe on Orders/Payments writes, live | S2.4 | D5 PM | the same capture sent twice with one Request-Id returns one capture id |
+| Studio Agent Framework hookup | S4.4, first task | D14 | Anthropic adapter behind a server proxy answers in Studio |
+
+Closed in Phase 1 with no carry-over: payee mode (D1), reauth timing (D2), SDK quirks (D3), bot cards (D4), Studio + Bryntum coexistence (D5), webhook verification design (D6), Payouts enabled on the co-op account (S1.5, D1), supplier DB isolation design (D7).
+
 ## Phase 2 — Payment backbone (Days 4–7, Oct 25–28)
 
 **How Phase 2 runs**
@@ -52,17 +68,17 @@ Spike code lives in `spikes/` and is throwaway. Its value is the sandbox test an
 
 | ID | When | Slice | Files to create | Proving test | Demo-visible? |
 |---|---|---|---|---|---|
-| S2.1 | D4 AM | Data model + migrations + base seed | `src/db/schema.ts`, `src/db/client.ts`, `src/db/migrations/*`, `drizzle.config.ts`, `scripts/seed-demo.ts` (members, one round) | `test/integration/schema.test.ts`: migrate an empty DB; duplicate `paypal_ops.business_key` rejected; `captured_cents > amount_cents` rejected; `UNIQUE(round_id, member_id)` on mandates | No |
+| S2.1 | D4 AM | Data model + migrations + base seed | `src/db/schema.ts`, `src/db/client.ts`, `src/db/migrations/*`, `drizzle.config.ts`, `scripts/seed-demo.ts` (members, one round) | `test/integration/schema.test.ts` (against `pnpm db:up`): migrate an empty DB; duplicate `paypal_ops.business_key` rejected; `captured_cents > amount_cents` rejected; `UNIQUE(round_id, member_id)` on mandates; `pledges.funding` only `paypal_wallet`/`demo_card`; round states include `invoiced`, `paid_out` | No |
 | S2.2 | D4 PM | Policy kernel v1: money, mandate validation, clearing, allocate, `evaluateRound`, state machines | `src/policy/{money,mandate,clearing,allocate,settlement,state,index}.ts` + `*.test.ts` | fast-check invariants 1–7 and 10 (ARCHITECTURE §6). Example tests: no-quorum → Abort; low-ceiling member released while quorum holds | No |
 | S2.3 | D5 AM | Mandate canonicalization + ECDSA P-256 sign/verify; `VerifiedMandate` brand | `src/pledge/mandate-sign.ts`, `src/pledge/mandate-sign.test.ts` | Tampering with any field → verify fails. Key order doesn't change the hash. `VerifiedMandate` can't be built outside the module (type test with `@ts-expect-error`) | No |
-| S2.4 🅿 | D5 PM | PayPal wrapper + outbox: `paypalCall`, UUIDv5 request ids, claim/complete, error classifier, fake port | `src/paypal/{client,call,orders,payments,webhooks,port,fake}.ts`, `src/outbox/{repo,request-id,errors,reconcile}.ts` + tests | Same business key twice → 1 row, 1 port call. Crash after insert → retry reuses the request id. Timeout → `unknown` → reconcile GET → `succeeded`. A stubbed `fetch` sees `Content-Type: application/json` on body-less POSTs (DECISIONS D3), and errors are read from `payload.body`. Boundary rules 2–3 pass | No |
-| S2.5 🅿 | D6 AM | Pledge flow: create-order and authorize routes, v6 button on `/round/:id` (bare UI), bot path in seed | `src/pledge/{service,routes}.ts`, `web/index.html`, `web/src/main.tsx`, `web/src/routes/Round.tsx`, `web/src/paypal/v6.ts`, `vite.config.ts` | `test/integration/pledge.test.ts` (fake port): pledge → order_created → authorized, with the mandate hash in `custom_id`. `pledge.sandbox.test.ts`: a bot pledge authorizes live. The card path is refused for a round with `is_demo = false` (DECISIONS D4) | **Yes** (member approves on PayPal) |
-| S2.6 🅿 | D6 PM | Webhook inbox: verify, dedupe, reconcile, `evaluateRound`, audit | `src/webhooks/{routes,handlers}.ts` + tests, `test/fixtures/webhooks/*.json` | Same event twice → one transition. Bad signature → stored with `verified=false`, not processed. AUTHORIZATION.CREATED for an already-authorized pledge → no-op | Yes (webhook log in cockpit later) |
-| S2.7 🅿 | D7 AM | Settlement worker: preflight, capture-all, void-all, reauth-before-settle, unwind (refund + void), tick loop | `src/settlement/{worker,planner}.ts`, `src/worker/main.ts` + tests | Fake-port scenarios: happy path; one capture fails after 2 succeed → Unwind refunds 2, voids rest; past `honor_ends_at` → reauth then capture the new id (inside the honor period: no reauth planned, per DECISIONS D2); worker killed mid-batch → restart, no duplicate capture. Boundary rule 3 | **Yes** (captures and voids) |
-| S2.8 🅿 | D7 PM | **After the policy-reviewer gate.** Fixed-price round end-to-end on Render (no negotiation yet), plain audit page, `/healthz`, and every env var documented | `src/api/{cockpit,sse,health}.ts`, `web/src/routes/Audit.tsx`, `scripts/smoke.ts`, `render.yaml` (web + worker + Postgres, health check path), `.env.example` (every key, per process, no values) | `health.test.ts`: 200 when the DB answers, 503 when it doesn't. A test asserts every key `loadCoordinatorEnv` reads appears in `.env.example`. `pnpm smoke --target=$RENDER_URL --scenario=fixed`: 3 bots + quorum → `settled` and captures visible via GET. `--scenario=no-quorum` → `voided` | **Yes** |
-| S2.9 🅿 | **Required (D1, R1 failed for direct payee):** D7 PM. S2.8 moves to D8 AM, S3.1 + S3.2 share D8 PM, and S4.6 is cut to recover | `coop_merchant` mode: orders without payee, Payouts to supplier after settle | `src/settlement/payout.ts`, tests | Fake port: `settled` → exactly one `payout:{roundId}` op. Sandbox: payout lands in the supplier account | Yes |
+| S2.4 🅿 | D5 PM | PayPal wrapper + outbox: `paypalCall`, UUIDv5 request ids, claim/complete, error classifier, fake port. **Reuse the spike code:** `withJsonContentType` (`spikes/r1/clients.ts`) becomes `client.ts`'s fetch, and `toOutcome`'s `payload.body` read (`spikes/r1/lifecycle.ts`) becomes `outbox/errors.ts`. Webhook verification is not here (it's `src/webhooks/verify.ts`, D6) | `src/paypal/{client,call,orders,payments,port,fake}.ts`, `src/outbox/{repo,request-id,errors,reconcile}.ts` + tests, `test/sandbox/request-id.sandbox.test.ts` | Same business key twice → 1 row, 1 port call. Crash after insert → retry reuses the request id. Timeout → `unknown` → reconcile GET → `succeeded`. A stubbed `fetch` sees `Content-Type: application/json` on body-less POSTs (DECISIONS D3), and errors are read from `payload.body`. `errors.ts` maps Payouts' 400 "sender_batch_id already exists" to already-done → reconcile (S1.5). Sandbox: one capture sent twice with the same Request-Id gives one capture id (carry-over). Boundary rules 2–3 pass | No |
+| S2.5 🅿 | D6 AM | **First:** JS SDK v6 client token + one human popup approval (carry-over). Then the pledge flow: create-order and authorize routes, v6 button on `/round/:id` (bare UI, code-split route), and the bot path in seed. Bots use a single-step card `createOrder` with no `authorizeOrder` (from `spikes/r2/bots.ts`); `spikes/r2/card.ts` moves to `src/pledge/card.ts` | `src/pledge/{service,routes}.ts`, `web/index.html`, `web/src/main.tsx`, `web/src/routes/Round.tsx`, `web/src/paypal/v6.ts`, `vite.config.ts` | `test/integration/pledge.test.ts` (fake port): pledge → order_created → authorized, with the mandate hash in `custom_id`. `pledge.sandbox.test.ts`: a bot pledge authorizes live. The card path is refused for a round with `is_demo = false` (DECISIONS D4). **Bundle check** (`scripts/check-bundle.ts` reads Vite's manifest): the `/round/:id` chunk graph contains neither `ag-studio*` nor `@bryntum/*` | **Yes** (member approves on PayPal) |
+| S2.6 🅿 | D6 PM | Webhook inbox. Signature verification and the route already exist (S1.4, D6); this adds the `webhook_events` insert, dedupe, reconcile, `evaluateRound` and audit, plus the `PAYMENT.PAYOUTS-ITEM.*` events | `src/webhooks/handlers.ts` + tests, `src/api/app.ts` (wire handler), `test/fixtures/webhooks/*.json` | Same event twice → one transition. Bad signature → stored with `verified=false`, not processed. AUTHORIZATION.CREATED for an already-authorized pledge → no-op | Yes (webhook log in cockpit later) |
+| S2.7 🅿 | D7 AM | Settlement worker: preflight, capture-all, void-all, reauth-before-settle, unwind (refund + void), tick loop | `src/settlement/{worker,planner}.ts`, `src/worker/main.ts` + tests | Fake-port scenarios: happy path; one capture fails after 2 succeed → Unwind refunds 2, voids rest; past `honor_ends_at` → reauth then capture the new id (inside the honor period: no reauth planned, per DECISIONS D2); worker killed mid-batch → restart, no duplicate capture. Boundary rule 3. **Live (carry-over):** reauthorize bot-3's `82C58801S8168605E` after 2026-10-25T10:51Z and record the result in DECISIONS D2 | **Yes** (captures and voids) |
+| S2.8 🅿 | D8 AM | **After the policy-reviewer gate and the user's first deploy (carry-over).** `render.yaml`, `/health` and env docs already exist (S1.4); what's left: the Phase 2 code deployed, fixed-price round end-to-end on Render (no negotiation yet), a plain audit page | `src/api/{cockpit,sse}.ts`, `web/src/routes/Audit.tsx`, `scripts/smoke.ts` | `pnpm smoke --target=$RENDER_URL --scenario=fixed`: 3 bots + quorum → `settled` and captures visible via GET. `--scenario=no-quorum` → `voided` | **Yes** |
+| S2.9 🅿 | D7 PM. **Required (D1).** S3.1 + S3.2 share D8 PM. S4.6 is **not** cut: S2.8 shrank because S1.4 pulled render.yaml, /health and env docs forward | Pay the supplier's invoice with one Payout (ARCHITECTURE §3.4): on `invoice_issued`, check amount == captured total → round `invoiced` → `payout:{roundId}` op (`sender_batch_id` = op key, `sender_item_id` = invoice id) → `PAYMENT.PAYOUTS-ITEM.SUCCEEDED` → `paid_out` → `payout_sent` to the supplier. Raw call via `paypalCall`; reuse `spikes/r4-payout/payout.ts`. The supplier side (issue invoice, record payment) is a stub until S3.7 | `src/settlement/payout.ts`, `src/policy/settlement.ts` (payout rule), tests | Fake port: exactly one payout op per round, even when `invoice_issued` is replayed; amount mismatch → terminal, no payout; Payouts' 400 "already exists" → reconcile, not retry. Sandbox: payout reaches SUCCESS (already proven once in S1.5) | Yes |
 
-**Exit:** a real sandbox round settles and a no-quorum round voids, both on Render, driven by `scripts/smoke.ts`.
+**Exit:** a real sandbox round settles and a no-quorum round voids, both on Render, driven by `scripts/smoke.ts`. All Phase 1 carry-overs due in Phase 2 are done.
 
 ## Phase 3 — Agents (Days 8–11, Oct 29–Nov 1)
 
@@ -128,7 +144,7 @@ MCP server (`list_rounds`, `pledge`, `round_status`), Vault v3 one-tap pledges, 
 
 ## Cut order if behind schedule
 
-Cut from the top: S4.6 supplier console → S3.8 Channel3 (use the fixture only) → S4.5 Bryntum dependency-shift (keep a static timeline) → S3.6 intake agent (form instead). **Never cut:** S2.4–S2.7 (outbox and settlement), S3.5 (injection on camera), S4.1–S4.4 (AG Studio prize), S5.1 (judge mode).
+Cut from the top (S4.6 is back in scope; see S2.9): S4.6 supplier console → S3.8 Channel3 (use the fixture only) → S4.5 Bryntum dependency-shift (keep a static timeline) → S3.6 intake agent (form instead). **Never cut:** S2.4–S2.7 (outbox and settlement), S3.5 (injection on camera), S4.1–S4.4 (AG Studio prize), S5.1 (judge mode).
 
 ## Decision gate log
 
@@ -137,4 +153,25 @@ Cut from the top: S4.6 supplier console → S3.8 Channel3 (use the fixture only)
 | D1 (Oct 22) | PAYEE_MODE | **`coop_merchant`**: direct-payee void → 403 PERMISSION_DENIED; co-op-merchant capture + void work; reauth too soon → 422 (DECISIONS.md D1–D3) |
 | D4 (Oct 22) | Bot authorization mode | **card-funded bots, demo mode only**: 3 single-step card authorizations, partial capture and void all work; human pledges stay on JS SDK v6 (DECISIONS D4) |
 | D5 (Oct 22) | Studio + Bryntum layout | **one React 19 + Vite app, same route**: AG Studio 3.0.0 grid + Bryntum Scheduler Pro 7.3.7 trial render together. Console is clean apart from AG Studio's missing-key notice. Agent Framework moved to S4.4 as its first task (DECISIONS D5) |
-| D3 | Supplier DB role on Render | _pending S1.4_ |
+| D7 (Oct 22) | Supplier DB isolation | **separate small Postgres** (`quorum-supplier-db`, added in S3.2) instead of a scoped role in a shared DB: isolation by config, no Render role privileges to discover |
+
+## Changes from the original plan (Phase 1 close-out, 2026-10-22)
+
+| # | Original plan | Now | Evidence |
+|---|---|---|---|
+| 1 | Supplier is the order's third-party `payee` | **Co-op is merchant of record**, no payee; S2.9 Payouts required | void on a third-party-payee authorization → 403 PERMISSION_DENIED (D1) |
+| 2 | Reauthorize when the honor period is about to end | **Reauthorize only after it ends**, then capture the new id | 422 `REAUTHORIZATION_TOO_SOON` (D2) |
+| 3 | Bot cards, conditions unknown | Card authorizations work, **demo mode only**; humans on JS SDK v6; single-step order, no `authorizeOrder` | R2 run (D4) |
+| 4 | `@paypal/paypal-server-sdk` from npm | APIMatic Context Plugin's `paypal` git package, plus a Content-Type fetch wrapper; errors read from `payload.body` | 415 on body-less POSTs (D3) |
+| 5 | Webhook verify via PayPal's postback API through the outbox | **Offline** signature verification, cert URL pinned | SDK has no verify call; outbox not built yet (D6) |
+| 6 | Licences for both sponsors read from env | AG Studio: `VITE_AG_STUDIO_LICENSE_KEY`. **Bryntum has no runtime key** (npm package decides) | Bryntum typings and package docs (D5) |
+| 7 | Separate `spikes/r3-studio` app | One `web/` Vite app with a `/spike` route; routes are code-split; the pledge page must load without AG Studio or Bryntum | 10 MB bundle; entry chunk is now 193 kB (D5) |
+| 8 | R3 includes the Studio Agent Framework | Moved to S4.4, which starts with an Anthropic adapter | boilerplate's adapter is OpenAI-only (D5) |
+| 9 | S1.4 deploys to Render | S1.4 **built, not deployed**; render.yaml, /health and env docs pulled forward from S2.8; the deploy is the user's dashboard steps | user's choice |
+| 10 | Sandbox accounts: any | **All US**; Render free Postgres rejected (expires before judging); hosting ≈ $20–25/month | approval error; Render plans (D7) |
+| 11 | Supplier: Invoicing only | **Invoice is the record, Payout pays it, supplier records the payment**; round states gain `invoiced`, `paid_out` | avoid double billing (ARCHITECTURE §3.4) |
+| 12 | Payouts first exercised in S2.9 (D7) | **Proven on D1** (S1.5); dedupe is by `sender_batch_id`, not Request-Id | batch `3243HRX3TGYBY` SUCCESS; replay → 400 "already exists" |
+| 13 | Supplier gets a scoped role in a shared Postgres | **Separate small Postgres** for the supplier | simpler isolation (D7) |
+| 14 | Integration tests "against a local Postgres" (unspecified) | `pnpm db:up` Docker Postgres 17; required before `pnpm test` from S2.1 | healthy-DB path now proven locally |
+| 15 | Phase 1 on D1–D3 | Closed on D1; ~2 days banked as buffer | — |
+

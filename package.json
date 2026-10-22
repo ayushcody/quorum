@@ -17,7 +17,9 @@
     "spike:authorize": "node --env-file=.env --import tsx scripts/spike-authorize.ts",
     "start:web": "node --import tsx src/server.ts",
     "start:worker": "node --import tsx src/worker/main.ts",
-    "dev:api": "node --env-file-if-exists=.env --import tsx --watch src/server.ts"
+    "dev:api": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
+    "db:up": "docker start quorum-pg 2>/dev/null || docker run -d --name quorum-pg -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:17",
+    "db:down": "docker stop quorum-pg"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

@@ -1,19 +1,23 @@
 # Quorum — Architecture
 
-Status: design, pre-code. Product intent lives in `docs/STRATEGY.md`; build order in `docs/PLAN.md`.
-Items marked **[verify R1/R2/R3]** are assumptions the Phase 1 spikes must confirm or overturn.
-After the spikes, update this file and record the outcome in `docs/PLAN.md` → "Decision gate".
+Status: Phase 1 closed 2026-10-22 (spikes R1–R3 + S1.4/S1.5, DECISIONS D1–D7); Phase 2 building. Product intent lives in `docs/STRATEGY.md`; build order in `docs/PLAN.md`.
+Spike results are folded in (§3.5 "What Phase 1 proved", §3.6 "Authorization windows"). Anything still unproven is listed in §3.5 "Still unverified", with its owner in PLAN's "Phase 1 carry-overs".
 
 ## 0. Decisions already made
 
 | Topic | Decision |
 |---|---|
 | LLM | Claude Sonnet 5.5 (`claude-sonnet-5-5`) via Vercel AI SDK `@ai-sdk/anthropic`, for every agent |
-| Judge mode | Seeded "bot" members authorize server-side with `payment_source.card` (PayPal sandbox test cards); the judge approves one pledge personally via JS SDK v6 |
+| Judge mode | **Demo mode only** (`rounds.is_demo`): seeded bot members authorize server-side with `payment_source.card` (PayPal sandbox test cards) in one `createOrder`, with no approval step (D4). **Human members always use the JS SDK v6 PayPal button.** The judge approves one pledge themselves |
 | Agent Toolkit | Loaded **only** in the supplier process, allowlisted to invoice + shipment-tracking tools. Buyer-side agents get zero PayPal tools |
 | Licenses | AG Studio and Bryntum licenses already run through Dec 15 judging |
 | Currency | USD only. All money is integer cents (`bigint` in DB, branded `Cents` in TS). No floats anywhere near money |
 | Payee mode | `coop_merchant` (docs/DECISIONS.md D1): orders carry no `payee`; the co-op is merchant of record and pays the supplier via Payouts after settle. Direct third-party payee failed R1 (void → 403 PERMISSION_DENIED) |
+| Auth windows | Honor period 72 h: reauthorize is refused inside it (422 `REAUTHORIZATION_TOO_SOON`), so reauth is planned only when `now > honor_ends_at`. `expiration_time` = created + 29 d for both wallet and card authorizations (D2, §3.6) |
+| Supplier settlement | Supplier **invoices** the co-op as the record, the co-op **pays that invoice with one Payout**, and the supplier **records the payment** on the invoice. One money trail, no double billing (§3.4) |
+| Webhooks | Signatures verified **offline**: CRC32 + SHA256withRSA against PayPal's cert, with the cert URL pinned to the sandbox cert path. No PayPal API call per event (D6) |
+| Frontend | One Vite app in `web/`. AG Studio 3.0.0 and Bryntum Scheduler Pro 7.3.7 (trial package) render together. Routes are code-split; the pledge page carries neither library (D5) |
+| Hosting | Render Blueprint `render.yaml`: Starter web + Starter worker + basic-256mb Postgres, ≈ $20–25/month, through Dec 15. The supplier gets its own small Postgres in S3.2 (D7) |
 | Environment | PayPal sandbox only. Process refuses to boot if the PayPal base URL is not `api-m.sandbox.paypal.com` |
 
 ## 1. Processes and deployment (Render)
@@ -27,9 +31,9 @@ After the spikes, update this file and record the outcome in `docs/PLAN.md` → 
                  │  • pledge inline ops      • deadline/reconcile      • supplier    │
  PayPal ─webhook─┤                            sweeps                    strategy+LLM │
                  │        │                        │                  • Agent Toolkit│
-                 │        └──────── Postgres ──────┘                    (invoice,    │
-                 │          schema public (coordinator)                  tracking)   │
-                 │          schema supplier (supplier role only) ◄─────────┘         │
+                 │        └──── quorum-db ─────────┘                    (invoice,    │
+                 │          (coordinator only)                           tracking)   │
+                 │                         quorum-supplier-db ◄──────────────┘       │
                  └────────────────────────────────────────────────────────────────────┘
  quorum-web/worker ──HMAC-signed HTTP──► quorum-supplier   (supplier messages = untrusted)
 ```
@@ -37,7 +41,9 @@ After the spikes, update this file and record the outcome in `docs/PLAN.md` → 
 - **quorum-web**: Hono on `@hono/node-server`. Serves the built React app, the API, SSE for live cockpit updates, and `POST /webhooks/paypal`.
 - **quorum-worker**: a single loop (≈1 s tick). Each tick does four things: (1) claim and run due PayPal outbox ops, (2) run due negotiation steps, (3) sweep round deadlines and authorization honor periods, (4) reconcile ops stuck in `in_flight` or `unknown`. No queue product. Postgres `FOR UPDATE SKIP LOCKED` is the queue.
 - **quorum-supplier**: a separate web service with its own entrypoint, env vars, PayPal REST app (the supplier's sandbox business account) and DB role. It talks to the coordinator only over the HMAC-signed protocol in `src/protocol/`.
-- **Postgres**: one Render managed instance. Two schemas. The supplier role can only use the `supplier` schema. **[verify R3-adjacent, Day 3]** If Render won't allow a second role, keep the separate schema and enforce isolation with the import-boundary test only.
+- **Postgres**: `quorum-db` for the coordinator (web + worker). The supplier gets a **separate small instance**, `quorum-supplier-db`, added to `render.yaml` in S3.2 (D7). Isolation is then config, not role grants. Both are private-network only (`ipAllowList: []`).
+- **Locally**: `pnpm db:up` runs Postgres 17 in Docker (`quorum-pg`, `postgres://postgres:dev@localhost:5432/postgres`). DB code runs here before it ever runs on Render.
+- **Blueprint**: `render.yaml` (S1.4) defines quorum-web (`healthCheckPath: /health`), quorum-worker and quorum-db. Secrets are `sync: false`. Not yet deployed: the first deploy is done by the user in the Render dashboard.
 - Paid instances during Dec 1–15 so judges never hit a cold start.
 
 ## 2. Module boundaries
@@ -64,14 +70,15 @@ src/
     port.ts         PayPalPort interface; fake.ts = in-memory test double
   outbox/       repo.ts (insert/claim/complete), request-id.ts (UUIDv5), reconcile.ts, errors.ts (classify)
   settlement/   worker.ts (the ONLY capture/void/reauth/refund caller), planner.ts (pure orchestration over a port)
-  webhooks/     routes.ts (verify → inbox insert → 200), handlers.ts (apply transitions, trigger evaluateRound)
+  webhooks/     verify.ts (offline signature check, D6; exists), handlers.ts (inbox insert, apply transitions, evaluateRound; S2.6)
   negotiation/  orchestrator.ts (ticks, turns), supplier-client.ts (HMAC), narrator.ts (buyer LLM, text only)
   agents/       intake.ts (NL → pledge draft), prompts.ts (public-facts-only builders), analyst-tools.ts (Studio agent, read-only DB)
   protocol/     messages.ts (zod schemas shared with supplier), hmac.ts
   supplier/     main.ts, env.ts, strategy.ts (supplier's own pure pricing), narrator.ts, fulfillment.ts (Agent Toolkit allowlist), db.ts
   benchmark/    channel3.ts (retail price lookup, cached)
   db/           schema.ts, client.ts, migrations/
-  api/          app.ts, cockpit.ts (read models), sse.ts, judge.ts, timeline.ts
+  api/          app.ts (Hono: /health, /webhooks/paypal; exists), cockpit.ts (read models), sse.ts, judge.ts, timeline.ts
+  server.ts     quorum-web entry (API + dist/web static + SPA fallback); worker/main.ts is quorum-worker's
   worker/       main.ts (the tick loop; calls settlement/worker.ts, negotiation, sweeps)
 web/            React 19 + Vite: /round/:id, /cockpit (AG Studio), /supplier, /judge; Bryntum timeline
 scripts/        sandbox-accounts.ts, seed-demo.ts, smoke.ts
@@ -98,9 +105,7 @@ The test parses imports with the TypeScript compiler API, which is already a dep
 
 ## 3. PayPal call sequence
 
-### 3.1 Happy path
-
-> **Superseded detail (D1):** this diagram was drawn for direct-payee mode. In the chosen `coop_merchant` mode the order has **no `payee`**, preflight checks the authorization's payee = co-op merchant id, and after `settled` the worker runs one `payout:{roundId}` op to the supplier before notifying it (section 3.4).
+### 3.1 Happy path (`coop_merchant`, as proven in R1)
 
 ```mermaid
 sequenceDiagram
@@ -114,38 +119,36 @@ sequenceDiagram
 
   M->>W: confirm pledge draft + ECDSA signature over canonical mandate
   W->>W: verify sig → VerifiedMandate, hash = sha256(canonical)
-  W->>DB: tx: insert mandate, pledge(order_pending), paypal_ops(create_order:{pledgeId})
-  W->>PP: POST /v2/checkout/orders intent=AUTHORIZE, amount=max exposure,<br/>payee.merchant_id=supplier, custom_id=mandate hash, invoice_id=pledgeId<br/>PayPal-Request-Id=uuidv5(create_order:{pledgeId})
-  PP-->>W: order id (CREATED)
+  W->>DB: tx: insert mandate, pledge(order_pending, funding=paypal_wallet), paypal_ops(create_order:{pledgeId})
+  W->>PP: POST /v2/checkout/orders intent=AUTHORIZE, amount=max exposure, NO payee,<br/>custom_id=mandate hash, invoice_id=pledgeId, PayPal-Request-Id=uuidv5(create_order:{pledgeId})
+  PP-->>W: order id (PAYER_ACTION_REQUIRED)
   W->>DB: op succeeded, pledge(order_created, paypal_order_id)
   W-->>M: order id → buyer approves in PayPal popup
   M->>W: onApprove(orderId)
   W->>DB: insert paypal_ops(authorize:{orderId})
-  W->>PP: POST /v2/checkout/orders/{id}/authorize (Request-Id)
-  PP-->>W: authorization id, status CREATED, expiration_time
-  W->>DB: tx: op succeeded, authorization row (honor_ends_at = created+72h), pledge(authorized), audit
+  W->>PP: POST /v2/checkout/orders/{id}/authorize (Request-Id; Content-Type set by the fetch wrapper, D3)
+  PP-->>W: authorization id CREATED, expiration_time = +29 d, payee = co-op
+  W->>DB: tx: op succeeded, authorization row (honor_ends_at = created+72h, paypal_expires_at), pledge(authorized), audit
   PP--)W: webhook PAYMENT.AUTHORIZATION.CREATED
-  W->>W: verify signature offline: CRC32(raw body) + SHA256withRSA against PayPal's pinned sandbox cert (D6)
+  W->>W: verify signature offline (D6)
   W->>DB: inbox insert ON CONFLICT(event_id) DO NOTHING; reconcile (no-op if already authorized)
   W->>W: policy.evaluateRound(snapshot, now) → Wait (quorum not yet met)
   Note over K,S: negotiation runs in parallel (section 4); quantity grows as pledges land
   K->>S: offer(k, unitPrice, qty) HMAC-signed
-  S-->>K: counter(offer, message) — untrusted
+  S-->>K: counter(offer, message), untrusted
   K->>K: policy.acceptOffer → Accept
   K->>DB: tx: round(locked, final_unit_price), then evaluateRound → Settle(plan)
   K->>DB: same tx: paypal_ops capture:{authId} × N (amount = price × allocated qty, final_capture=true)<br/>+ void:{authId} for released pledges
-  loop preflight, then each op (settlement/worker.ts)
-    K->>PP: GET /v2/payments/authorizations/{id} → must be CREATED, custom_id = mandate hash
+  loop preflight (settlement/worker.ts)
+    K->>PP: GET /v2/payments/authorizations/{id} → CREATED, payee = co-op, custom_id = mandate hash
   end
   loop each capture/void op
-    K->>PP: POST .../authorizations/{id}/capture {amount, final_capture:true} (Request-Id)
-    PP-->>K: capture id COMPLETED (remainder of hold released)
-    K->>DB: tx: op succeeded, pledge(captured), audit
+    K->>PP: POST .../authorizations/{id}/capture {amount, final_capture:true} or .../void (Request-Id)
+    PP-->>K: capture COMPLETED (remainder of hold released) / VOIDED
+    K->>DB: tx: op succeeded, pledge(captured|voided), audit
   end
   PP--)W: PAYMENT.CAPTURE.COMPLETED ×N → inbox → reconcile → evaluateRound → round(settled)
-  W->>S: round_settled(roundId, captureIds, totals) HMAC-signed
-  S->>PP: (Agent Toolkit, supplier creds) create invoice → record payment → add tracking
-  S-->>W: fulfillment(invoiceId, tracking) → round(fulfilled)
+  Note over K,S: settlement to the supplier: §3.4 (invoice → payout → record payment)
 ```
 
 ### 3.2 Failure paths
@@ -165,32 +168,60 @@ All-or-nothing across N members cannot be atomic at PayPal. We get close with (a
 
 ### 3.3 Bot members (judge mode)
 
-`POST /v2/checkout/orders` with `intent=AUTHORIZE` and `payment_source.card` (a published sandbox test card, `attributes.verification.method=SCA_WHEN_REQUIRED`). **Verified in R2 (DECISIONS D4):** the response is `COMPLETED` with the authorization inline, there is no approval step, and no 3DS challenge was triggered. **Demo mode only:** a non-demo round refuses this path. Human members always use the JS SDK v6 PayPal button. Same outbox row, same Request-Id rule, same `custom_id` = mandate hash. Bots sign mandates with server-held P-256 keys generated by `pnpm seed:demo`.
+**Demo mode only** (`rounds.is_demo = true`; a non-demo round refuses this path, tested in S2.5). Human members always use the JS SDK v6 PayPal button.
 
-### 3.4 Co-op-as-merchant mode (CHOSEN, D1: third-party payee void was refused in R1)
+- One `POST /v2/checkout/orders` with `intent=AUTHORIZE`, no payee, `payment_source.card` (a sandbox test card from `SANDBOX_CARD_*`), `verification.method=SCA_WHEN_REQUIRED`, and `custom_id` = mandate hash.
+- **Proven in R2 (D4):** the order comes back `COMPLETED` with the authorization inline (`purchase_units[0].payments.authorizations[0]`). There is **no approval step and no `authorizeOrder` call**, and no 3DS challenge was triggered.
+- Same outbox row and Request-Id rule (`create_order:{pledgeId}`). The pledge is stored with `funding = demo_card`. Card fields are never logged.
+- Bots sign mandates with server-held P-256 keys generated by `pnpm seed:demo`.
+- Sandbox quirks: no `processor_response`, seller protection `NOT_ELIGIBLE`, fees visible on captures. The cockpit doesn't rely on any of them.
 
-- Orders are created **without** `payee`. The coordinator's sandbox business account is the merchant and captures.
-- After `settled`, the coordinator pays the supplier. The default is a Payouts call (one outbox op, `payout:{roundId}`). The supplier then records the payment on its invoice.
-- Config flag `PAYEE_MODE=direct|coop_merchant`. The decision is made once at the Day 3 gate and both modes are not maintained afterwards. `coop_merchant` adds one slice to Phase 2 (see PLAN).
+### 3.4 Co-op as merchant, and paying the supplier (CHOSEN: D1)
 
-### 3.5 Facts to verify in R1 (we believe, not yet confirmed)
+Orders carry **no `payee`**. The co-op's sandbox business account is merchant of record and owns capture, void and reauthorize for every authorization. Production code supports only this mode (`PAYEE_MODE` survives in spikes only). Direct third-party payee failed R1: void → 403 `PERMISSION_DENIED`.
 
-**Verified live on 2026-10-22 (scripts/spike-authorize.ts, Merchant app, all sandbox accounts US; see BUILD-LOG):**
-- A wallet-funded AUTHORIZE order with a third-party `payee.email_address` can be created, approved by a buyer, and authorized by our app. The authorization's `payee.merchant_id` is the supplier's.
-- Partial capture of that authorization with `final_capture: true` **works** from our app: $6.00 of $10.00 → COMPLETED, and the authorization goes to CAPTURED.
-- **Void of that authorization is refused**: 403 `NOT_AUTHORIZED` / `PERMISSION_DENIED`. A plain Merchant app cannot void a third-party payee's authorization, so direct mode cannot do void-all. PAYEE_MODE needs a decision (PLAN decision gate).
-- `coop_merchant` (no payee) run: authorize, partial capture (`5LA82449F80020224` COMPLETED → CAPTURED) and void (`9WH953265U931150D` VOIDED) all work.
-- Reauthorize inside the 3-day honor period → 422 `REAUTHORIZATION_TOO_SOON`. A successful reauth is still to be exercised after the honor period (D2).
-- The SDK omits `Content-Type` on body-less POSTs (authorize without a body, void), and PayPal answers 415. `src/paypal/client.ts` must pass a `fetch` wrapper that sets `Content-Type: application/json`.
-- On typed error arms, the SDK nests PayPal's error model under `payload.body`.
-- Sandbox accounts must be US for USD orders. Non-US accounts make PayPal's approval page say the seller "doesn't accept payments in your currency".
+**One money trail to the supplier.** The invoice is the record and the payout pays it, so nothing is billed twice:
 
-- Partial capture with `final_capture: true` releases the remainder of the hold.
-- Capturing an authorization whose order has a third-party `payee` works with only our app credentials. It may instead need payee-granted permissions or `PayPal-Auth-Assertion`.
-- Reauthorize: what the sandbox allows inside the 3-day honor period (it may reject "too soon"), and whether it works on card-funded authorizations. If it can't be exercised live, test the path with PayPal's sandbox negative-testing mock header and record that in BUILD-LOG.
-- How long PayPal keeps a `PayPal-Request-Id` for deduplication. Our own design does not depend on it (section 5.3).
-- ~~Exact SDK method names~~ Resolved in S1.1: `client.orders.{createOrder,authorizeOrder,getOrder,createOrderTracking}` and `client.payments.{captureAuthorizedPayment,voidPayment,reauthorizePayment,refundCapturedPayment,getAuthorizedPayment,getCapturedPayment}`, each taking `payPalRequestId`. The SDK has no webhook verification, invoicing or payouts, so those are raw `fetch` calls through `paypalCall`. `reauthorizePayment` takes no `PayPal-Mock-Response`, so negative-testing reauth needs a raw call.
-- JS SDK v6 needs a browser-safe client token minted server-side. That mint is itself a PayPal call and goes through `paypalCall`.
+| # | Who | What | PayPal call |
+|---|---|---|---|
+| 1 | coordinator | Round reaches `settled` (all captures COMPLETED, money with the co-op). Sends `round_settled(roundId, totalCents, captureIds)` | — |
+| 2 | supplier agent | **Issues an Invoice to the co-op** for exactly `totalCents`. It's the record of the sale, not a request for new money. Replies `invoice_issued(invoiceId, amountCents)` | Invoicing v2 create + send (Agent Toolkit, supplier credentials) |
+| 3 | coordinator policy | Checks `amountCents == totalCents` (a mismatch is a terminal error, never a partial payout) → round `invoiced`, enqueue `payout:{roundId}` | — |
+| 4 | `settlement/worker.ts` | **Pays that invoice with one Payout**: `sender_batch_id = payout:{roundId}`, `sender_item_id = invoiceId`, receiver = supplier sandbox email | `POST /v1/payments/payouts` (raw call through `paypalCall`; not in the SDK) |
+| 5 | coordinator | `PAYMENT.PAYOUTS-ITEM.SUCCEEDED` (webhook or reconcile GET of the batch) → round `paid_out`. Sends `payout_sent(invoiceId, payoutItemId)` | `GET /v1/payments/payouts/{batch}` on reconcile |
+| 6 | supplier agent | **Records the payment on the invoice** ("paid externally", note = payout item id), so the invoice can never be collected again. Adds tracking, then sends `fulfillment` → round `fulfilled` | Invoicing v2 record payment + shipment tracking |
+
+- **Idempotency for Payouts is `sender_batch_id`, proven in S1.5.** Re-sending the same request with the same `PayPal-Request-Id` did not return the original batch. It returned 400 `USER_BUSINESS_ERROR` / "Batch with given sender_batch_id already exists", with a link to the existing batch. So the batch id must be deterministic (`payout:{roundId}`), and `outbox/errors.ts` treats that 400 as "already exists" → reconcile by GET.
+- S3.7 confirms the record-payment method enum and whether the Agent Toolkit exposes record-payment. If it doesn't, it's a raw Invoicing call from the supplier process.
+- Payouts is confirmed working on the co-op sandbox account (S1.5: batch `3243HRX3TGYBY` SUCCESS, item `G8SHLNPT8PLNA`).
+
+### 3.5 What Phase 1 proved (live sandbox, 2026-10-22; run ids in DECISIONS and BUILD-LOG)
+
+**Verified**
+- **Payee (R1, D1):** with a third-party payee, authorize + partial capture work but **void is refused** (403 `NOT_AUTHORIZED` / `PERMISSION_DENIED`). With no payee (co-op is merchant), authorize, partial capture (`final_capture: true` releases the remainder; authorization → CAPTURED) and void all work.
+- **Bots (R2, D4):** card-funded AUTHORIZE orders come back COMPLETED in one call with the authorization inline. Partial capture and void work on them too.
+- **Payouts (S1.5, D1):** a co-op → supplier payout reaches SUCCESS in about 25 s. Dedupe is by `sender_batch_id` (§3.4).
+- **SDK (D3):** the APIMatic `paypal` package covers Orders and Payments with `payPalRequestId` on every write. It omits `Content-Type` on body-less POSTs (PayPal answers 415), so `src/paypal/client.ts` gets a fetch wrapper. Typed error arms nest PayPal's error under `payload.body`. `Prefer` defaults to `return=minimal`, so we send `return=representation`.
+- **Frontend (R3, D5):** AG Studio 3.0.0 and Bryntum Scheduler Pro 7.3.7 render on one route of one Vite app. Bryntum has no runtime licence key. AG Studio's missing key is a console error until `VITE_AG_STUDIO_LICENSE_KEY` is set.
+- **Accounts:** every sandbox account must be US for USD orders (non-US gives "seller doesn't accept payments in your currency").
+- **Local infra (S1.4):** `/health` against a real Postgres gives 200 → 503 when the DB stops → 200 when it's back, with no server restart.
+
+**Still unverified** (owner and slice in PLAN "Phase 1 carry-overs")
+- A webhook PayPal actually signed passing our offline verification (needs the Render deploy, D6).
+- The JS SDK v6 client-token + popup approval path. Human approvals so far used the approve link.
+- A **successful** reauthorize (only after the honor period; bot-3's authorization `82C58801S8168605E` is eligible after 2026-10-25T10:51Z). Also unknown: whether reauth works on card authorizations, and whether it is limited to once.
+- `PayPal-Request-Id` dedupe on Orders/Payments writes (never run live; the design doesn't depend on it, §5.3).
+- The Studio Agent Framework hookup (S4.4, starting with an Anthropic adapter).
+
+### 3.6 Authorization windows
+
+| Fact | Value | Source |
+|---|---|---|
+| Honor period | 72 h from creation (`honor_ends_at`) | PayPal docs; reauth inside it → 422 `REAUTHORIZATION_TOO_SOON` (R1) |
+| Validity | `expiration_time` = created + 29 d, seen on wallet **and** card authorizations | R1, R2 responses |
+| Reauth rule | Plan `Reauth` only when `now > honor_ends_at` and `now < paypal_expires_at`; then capture the **new** id | D2 |
+| Round design | Rounds close inside 72 h, so reauth is a fallback, not the normal path | STRATEGY risk (a) |
+| Sandbox caveat | STRATEGY quotes PayPal: sandbox authorizations "don't expire after 29 days". Treat `paypal_expires_at` as authoritative anyway | unverified |
 
 ## 4. Negotiation (OG-Narrator)
 
@@ -223,7 +254,7 @@ Every PayPal call goes through `paypal/call.ts::paypalCall(opId)`, which loads t
 | void | `void:{paypalAuthorizationId}` |
 | reauthorize | `reauth:{paypalAuthorizationId}` |
 | refund | `refund:{paypalCaptureId}` |
-| payout (fallback) | `payout:{roundId}` |
+| payout | `payout:{roundId}`, also sent as Payouts' `sender_batch_id`, which is what PayPal actually dedupes on (S1.5) |
 | reads | `get:{resource}:{id}:{n}` (n = per-row counter; reads are safe to repeat) |
 
 `UNIQUE(business_key)` means a retried intent can never create a second op. Re-running the planner is a no-op (`INSERT … ON CONFLICT DO NOTHING`). Correctness never relies on PayPal's dedupe window. Before re-issuing any op whose outcome is unknown, we GET the resource and reconcile first.
@@ -247,7 +278,9 @@ pending ──claim──► in_flight ──2xx──► succeeded
 
 `POST /webhooks/paypal` verifies the signature offline (DECISIONS D6: PayPal's documented CRC32 + SHA256withRSA check against the cert at `paypal-cert-url`, which is pinned to `https://api.sandbox.paypal.com/v1/notifications/certs/`), inserts into `webhook_events` (`UNIQUE(paypal_event_id)`, `ON CONFLICT DO NOTHING`) and returns 200. Processing then reconciles domain state and calls `evaluateRound`. Webhooks **confirm** what our own API responses already recorded. They are not the primary trigger for our own actions, so a lost webhook degrades only latency (the reconcile sweep covers it), never correctness. Unverified events are stored with `verified=false` and never processed.
 
-Subscribed: `PAYMENT.AUTHORIZATION.CREATED`, `PAYMENT.AUTHORIZATION.VOIDED`, `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.DENIED`, `PAYMENT.CAPTURE.PENDING`, `PAYMENT.CAPTURE.REFUNDED`, `CUSTOMER.DISPUTE.CREATED`.
+Subscribed: `PAYMENT.AUTHORIZATION.CREATED`, `PAYMENT.AUTHORIZATION.VOIDED`, `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.DENIED`, `PAYMENT.CAPTURE.PENDING`, `PAYMENT.CAPTURE.REFUNDED`, `PAYMENT.PAYOUTS-ITEM.SUCCEEDED`, `PAYMENT.PAYOUTS-ITEM.FAILED`, `CUSTOMER.DISPUTE.CREATED`.
+
+Today (S1.4) the route verifies and logs ids only, returning 200 / 400 (bad signature) / 503 (no `PAYPAL_WEBHOOK_ID` yet). S2.6 adds the inbox table, dedupe and reconcile.
 
 ### 5.6 Concurrency
 
@@ -263,9 +296,9 @@ Conventions: `id uuid pk default gen_random_uuid()`, `created_at timestamptz not
 
 **mandates**: `id`, `round_id fk`, `member_id fk`, `max_unit_price_cents`, `qty_min int check > 0`, `qty_max int check >= qty_min`, `deadline_at`, `canonical_json text not null`, `hash char(64) not null unique`, `signature text not null`, `created_at`. `UNIQUE(round_id, member_id)`.
 
-**pledges**: `id`, `mandate_id fk unique`, `round_id fk`, `member_id fk`, `status text`, `paypal_order_id text unique null`, `max_exposure_cents` (= max_unit_price × qty_max), `allocated_qty int null`, `capture_amount_cents bigint null`, `released_reason text null`, `created_at`, `updated_at`. Index `(round_id, status)`.
+**pledges**: `id`, `mandate_id fk unique`, `round_id fk`, `member_id fk`, `funding text check in ('paypal_wallet','demo_card')` (`demo_card` only when the round `is_demo`, D4), `status text`, `paypal_order_id text unique null`, `max_exposure_cents` (= max_unit_price × qty_max), `allocated_qty int null`, `capture_amount_cents bigint null`, `released_reason text null`, `created_at`, `updated_at`. Index `(round_id, status)`.
 
-**authorizations**: `id`, `pledge_id fk`, `paypal_authorization_id text unique not null`, `parent_authorization_id uuid null fk authorizations`, `amount_cents`, `currency`, `status text` (`created|captured|voided|expired|denied|reauthorized`), `paypal_expires_at timestamptz`, `honor_ends_at timestamptz`, `paypal_capture_id text unique null`, `captured_cents bigint null`, `created_at`, `updated_at`. Check `captured_cents <= amount_cents`.
+**authorizations**: `id`, `pledge_id fk`, `paypal_authorization_id text unique not null`, `parent_authorization_id uuid null fk authorizations`, `amount_cents`, `currency`, `status text` (`created|captured|voided|expired|denied|reauthorized`), `paypal_expires_at timestamptz` (from PayPal's `expiration_time`), `honor_ends_at timestamptz` (created + 72 h), `paypal_capture_id text unique null`, `captured_cents bigint null`, `created_at`, `updated_at`. Check `captured_cents <= amount_cents`.
 
 **negotiation_turns**: `id`, `round_id fk`, `seq int`, `side text check in ('buyer','supplier')`, `unit_price_cents`, `qty int`, `message text` (supplier text stored verbatim, rendered escaped), `intent text null`, `policy_verdict text null`, `verdict_reason text null`, `created_at`. `UNIQUE(round_id, seq)`.
 
@@ -275,16 +308,16 @@ Conventions: `id uuid pk default gen_random_uuid()`, `created_at timestamptz not
 
 **audit_log** (append-only; no UPDATE/DELETE grants for the app role): `id bigserial`, `round_id fk null`, `actor text` (`policy|worker|webhook|agent:intake|agent:narrator|member:{id}|supplier`), `action text`, `data jsonb`, `created_at`. Index `(round_id, id)`.
 
-**fulfillments**: `id`, `round_id fk unique`, `paypal_invoice_id text null`, `invoice_status text null`, `carrier text null`, `tracking_number text null`, `reported_at`. Written from the supplier's signed `fulfillment` message. The coordinator does not call Invoicing itself.
+**fulfillments**: `id`, `round_id fk unique`, `paypal_invoice_id text null`, `invoice_amount_cents bigint null`, `invoice_status text null`, `payout_batch_id text null`, `payout_item_id text null`, `payout_status text null`, `carrier text null`, `tracking_number text null`, `reported_at`. Written from the supplier's signed `invoice_issued` / `fulfillment` messages and the coordinator's own payout op (§3.4). The coordinator never calls Invoicing itself.
 
 **benchmarks**: `id`, `sku text`, `query text`, `best_unit_price_cents`, `retailer text`, `url text`, `raw jsonb`, `fetched_at`. Cache for Channel3. Seed fixture as fallback.
 
-Schema `supplier` (supplier role only): `supplier.price_tiers(sku, min_qty, unit_price_cents)`, `supplier.floors(sku, floor_unit_price_cents)`, `supplier.sessions(round_ref, step, last_offer_cents)`, `supplier.fulfillments(round_ref, paypal_invoice_id, tracking_number)`.
+Supplier database `quorum-supplier-db` (separate instance, D7): `supplier.price_tiers(sku, min_qty, unit_price_cents)`, `supplier.floors(sku, floor_unit_price_cents)`, `supplier.sessions(round_ref, step, last_offer_cents)`, `supplier.fulfillments(round_ref, paypal_invoice_id, tracking_number)`.
 
 ### State machines (`policy/state.ts`)
 
 ```
-Round:   draft → open → locked → settling → settled → fulfilled
+Round:   draft → open → locked → settling → settled → invoiced → paid_out → fulfilled
                    │       │         └──► unwinding → failed
                    │       └────────► voiding → voided
                    └────────────────► voiding → voided           (deadline, no quorum)
@@ -322,6 +355,7 @@ Live updates: SSE from `api/sse.ts` with `round:{id}` events emitted after each 
 
 ## 8. Dependencies (each needs its reason in the commit that adds it)
 
-Fixed by CLAUDE.md: Hono, Drizzle, React 19, Vite, AG Studio React, Bryntum Scheduler Pro React, PayPal JS SDK v6 (script tag, no npm package), APIMatic PayPal Server SDK (`paypal`, git dependency, the one the APIMatic Context Plugin documents), `@paypal/agent-toolkit`, `ai`. Supporting additions, each justified:
-`@hono/node-server` (runs Hono on Node), `drizzle-kit` (migrations), `postgres` (the driver Drizzle needs), `zod` (env + protocol validation; already a transitive dependency of `ai`), `@ai-sdk/anthropic` (Claude provider), `vitest` (test runner that shares Vite config), `fast-check` (mandated property tests), `tsx` (run TS scripts and the worker in dev).
+**Installed now (exact pins in package.json; reasons in each adding commit):** `paypal` 2.29.0 (APIMatic SDK, git `context-plugins/paypal-typescript-sdk#5d0df8a`), `hono` 4.13.13, `@hono/node-server` 2.1.5, `postgres` 3.4.9, `zod` 4, `react`/`react-dom` 19.2.8, `ag-studio`/`ag-studio-react` 3.0.0 (pull in ag-grid 36.2.0 and ag-charts 14.2.0), `@bryntum/schedulerpro` (alias of `-trial` 7.3.7) + `@bryntum/schedulerpro-react` 7.3.7, `vite` 8.3.5, `@vitejs/plugin-react` 6.1.2. Dev: `typescript` 5.9, `vitest` 3, `tsx` 4, `@types/*`.
+
+**Still to add when their slice starts:** Drizzle + `drizzle-kit` (S2.1), `fast-check` (S2.2), `ai` + `@ai-sdk/anthropic` (S3.4), `@paypal/agent-toolkit` (S3.7). PayPal JS SDK v6 is a script tag, not a package.
 Not added: queues, Redis, websockets, lint plugins for boundaries, Testcontainers, Playwright. The API-level `scripts/smoke.ts` covers end-to-end.

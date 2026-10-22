@@ -1,10 +1,17 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { SpikePage } from "./spike/SpikePage.tsx";
+// Heavy libraries load per route: AG Studio and Bryntum must never be in the shell a phone downloads first.
+const SpikePage = lazy(() => import("./spike/SpikePage.tsx").then((m) => ({ default: m.SpikePage })));
 
 // No router dependency yet: one path switch until the real routes land (S2.5).
 function App() {
-  if (window.location.pathname === "/spike") return <SpikePage />;
+  if (window.location.pathname === "/spike") {
+    return (
+      <Suspense fallback={<p style={{ fontFamily: "system-ui", padding: 24 }}>Loading…</p>}>
+        <SpikePage />
+      </Suspense>
+    );
+  }
   return (
     <main style={{ fontFamily: "system-ui", padding: 24 }}>
       <h1>Quorum</h1>

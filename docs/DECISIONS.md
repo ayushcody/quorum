@@ -18,8 +18,9 @@ Phase 1 decision gate (docs/PLAN.md). Each decision cites the evidence in `docs/
 **Decision.** Orders carry **no `payee`**. The co-op's sandbox business account is the merchant of record. Our app owns capture, void and reauthorize for every authorization. After a round settles, the co-op pays the supplier.
 
 **Consequences**
-- **S2.9 (Payouts to supplier) is now required**, not conditional. It is one outbox op `payout:{roundId}`, executed by `settlement/worker.ts` after `settled`. Payouts is not in the APIMatic SDK, so it is a raw call through `paypalCall`. The co-op sandbox account must have Payouts enabled; verify on S2.9's first run.
-- The supplier's invoice is addressed to the co-op and marked paid against the payout. The coordinator still never calls Invoicing itself.
+- **S2.9 (Payouts to supplier) is now required**, not conditional. It is one outbox op `payout:{roundId}`, executed by `settlement/worker.ts`. Payouts is not in the APIMatic SDK, so it is a raw call through `paypalCall`.
+- **Payouts is enabled and works on the co-op sandbox account (S1.5, 2026-10-22):** a $1.00 payout to `SUPPLIER_SANDBOX_EMAIL`, batch `3243HRX3TGYBY` → SUCCESS, item `G8SHLNPT8PLNA` SUCCESS, transaction `91H19774N3048930L`, in about 25 s. **Dedupe is by `sender_batch_id`, not `PayPal-Request-Id`:** replaying the identical request with the same Request-Id returned 400 `USER_BUSINESS_ERROR` / "Batch with given sender_batch_id already exists" (debug_id ca4e8963f3f12), with a link to the existing batch. So `sender_batch_id` = the op's business key, and that 400 means already done → reconcile by GET.
+- **One money trail (ARCHITECTURE §3.4):** the supplier agent issues an Invoice to the co-op as the record. The co-op pays that invoice with one Payout (`sender_item_id` = invoice id, amount must equal the invoice). The supplier then records the payment on the invoice as paid externally. The invoice never asks for new money and can't be collected twice. The coordinator never calls Invoicing itself.
 - The `payee.merchant_id` check in the policy preflight changes to "authorization payee = co-op merchant id".
 - README is honest about it: "the co-op is merchant of record and pays the supplier on settlement". Funds sit with the co-op between settle and payout; we make that window short and visible in the cockpit.
 - `SUPPLIER_SANDBOX_EMAIL` / `SUPPLIER_MERCHANT_ID` become the **payout receiver**, not an order field.
@@ -109,10 +110,18 @@ Phase 1 decision gate (docs/PLAN.md). Each decision cites the evidence in `docs/
 
 **Still to verify live:** unit tests use a locally generated key in the same format. The first real sandbox event after deploy must log `paypal_webhook` with `verified: true`, which confirms the message format against PayPal's real signing (Render steps in the S1.4 hand-off). Events from the dashboard's **Webhooks simulator** are not expected to verify against our webhook id; use real sandbox activity instead.
 
+## D7 · Supplier DB isolation and Render costs (2026-10-22)
+
+**Supplier DB.** The supplier service gets its **own small Render Postgres** (`quorum-supplier-db`, basic-256mb), added to `render.yaml` with the supplier service in S3.2. It does not get a scoped role in a shared database. Isolation is then pure config: separate `DATABASE_URL`, separate instance, private network only. There is no need to find out whether Render's managed Postgres grants `CREATEROLE`. The original "second Postgres role" gate item is closed; no further investigation.
+
+**Costs.** Starter web + Starter worker + basic-256mb Postgres in Oregon is roughly **$20–25/month**. The supplier's DB and service add a few dollars each from S3.2. These run through Dec 15: a cold start or an expired free database during judging costs far more than this. Free tiers are rejected (free web services sleep; free Postgres expires).
+
+**Local DB.** `pnpm db:up` runs Docker `postgres:17` as `quorum-pg` on 5432 (password `dev`, local only). DB code runs here before it runs on Render. The healthy path was proven on 2026-10-22: `/health` 200 → 503 with the container stopped → 200 again, with no server restart.
+
 ## Pending gate items
 
 | Item | Status |
 |---|---|
 | Bot authorization mode (R2, S1.2) | **decided: D4** |
 | AG Studio + Bryntum layout (R3, S1.3) | **decided: D5** (one app, one route; Agent Framework still unproven) |
-| Supplier DB role on Render (S1.4) | pending |
+| Supplier DB role on Render (S1.4) | **decided: D7** (separate small Postgres, no role grants) |
