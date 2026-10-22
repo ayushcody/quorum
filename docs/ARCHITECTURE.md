@@ -314,7 +314,7 @@ Pledge:  order_pending → order_created → authorized ⇄ reauthorizing
 ## 7. Frontend surfaces
 
 - `/round/:id`: the member pledge page (mobile-first). Intake chat → mandate card → sign (WebCrypto) → JS SDK v6 PayPal button.
-- `/cockpit`: AG Studio with a custom theme. Widgets: quorum thermometer, price-tier curve with the live bid, member authorization grid with honor-period countdown, savings vs Channel3, negotiation transcript with policy verdicts. A custom "Coalition Agent" in the Studio Agent Framework uses read-only `analyst-tools` and talks to Studio's built-in agents. **[verify R3]**
+- `/cockpit`: AG Studio with a custom theme. Widgets: quorum thermometer, price-tier curve with the live bid, member authorization grid with honor-period countdown, savings vs Channel3, negotiation transcript with policy verdicts. A custom "Coalition Agent" in the Studio Agent Framework uses read-only `analyst-tools` and talks to Studio's built-in agents. **[R3: Studio and Bryntum confirmed in one app (DECISIONS D5). The Agent Framework hookup is still unproven and needs an Anthropic adapter. S4.4 starts there.]**
 - Bryntum Scheduler Pro timeline: pledge window → negotiation → capture → delivery. Capture is dependency-blocked until quorum, and a void or late authorization visibly shifts delivery.
 - `/supplier`: the supplier console (offers received, red-team toggle, invoice, tracking).
 - `/judge`: "Run a full round" and "Run a failure round". Each run creates a fresh demo round and is rate-limited.

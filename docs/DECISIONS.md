@@ -65,10 +65,40 @@ Phase 1 decision gate (docs/PLAN.md). Each decision cites the evidence in `docs/
 - `processor_response` is absent on the sandbox authorization, and seller protection is `NOT_ELIGIBLE`, so neither can be relied on in the UI.
 - The authorization lifetime matches wallet authorizations: created + 29 days. The capture showed a $0.65 sandbox PayPal fee on $6.00, so the cockpit should show net amounts if it shows fees at all.
 
+## D5 · AG Studio and Bryntum Scheduler Pro share one React 19 + Vite app (2026-10-22)
+
+**Evidence.** The `/spike` route (`web/src/spike/SpikePage.tsx`, run with `pnpm dev`) renders one AG Studio grid widget over a `pledges` source, plus a Bryntum Scheduler Pro timeline. The timeline has four lanes and a payment-gated dependency chain: pledge window and negotiation → quorum reached → capture → delivery. It was checked in the browser at the pane size and at 1400×900. A production `vite build` also succeeds.
+
+**Exact versions** (pinned exactly in package.json):
+
+| Package | Version | Notes |
+|---|---|---|
+| `react`, `react-dom` | 19.2.8 | same as the PayPal × AG Grid boilerplate; 19.3.1 exists but is untested here |
+| `ag-studio`, `ag-studio-react` | 3.0.0 | must be identical (AG Studio install docs) |
+| ↳ `ag-grid-enterprise` / `ag-grid-community` | 36.2.0 | transitive, via `ag-studio` (`~36.2.0`) |
+| ↳ `ag-charts-enterprise` / `ag-charts-community` | 14.2.0 | transitive, via `ag-studio` (`~14.2.0`) |
+| `@bryntum/schedulerpro` | `npm:@bryntum/schedulerpro-trial@7.3.7` | public trial, installed under the licensed name by npm alias |
+| `@bryntum/schedulerpro-react` | 7.3.7 | React wrapper; requires React ≥ 18 and Vite ≥ 5 |
+| `vite` / `@vitejs/plugin-react` | 8.3.5 / 6.1.2 | `root: web`, `envDir: ..` (reads the project-root .env) |
+| `@types/react` / `@types/react-dom` | 19.2.8 / 19.2.3 | |
+
+**Licences: how each product reads them**
+- **AG Studio**: runtime key, `AgStudioProvider licenseKey`, read from `VITE_AG_STUDIO_LICENSE_KEY` by `readLicenses()`. Without a key all features work, but Studio logs a "License Key Not Found" block at **console.error** level and shows a watermark. **The spike's console is error-free only once that key is set.** VITE_ variables are bundled into browser JS. That is expected for AG Studio keys, which ship client-side, but never put another secret under a VITE_ name.
+- **Bryntum**: there is **no runtime licence key**. The trial-vs-licensed switch is the npm package, so nothing is read from env. The trial package shows a watermark and logs one info line ("Bryntum SchedulerPro 7.3.7 Trial"). To use the licensed build, run `npm login` to `npm.bryntum.com` with Bryntum Customer Zone credentials (the user does this; credentials are never put in the repo). Then change the alias to `"@bryntum/schedulerpro": "7.3.7"` from that registry. No application code changes.
+
+**Integration notes**
+- Bryntum needs three CSS imports (structural `schedulerpro.css`, exactly one theme such as `svalbard-light.css`, and FontAwesome's `fontawesome.css` + `solid.css`), plus a parent with a definite height. A CSS grid with `minmax(300px, 1fr)` rows keeps it from collapsing to its min-height, which otherwise triggers a console warning.
+- Bryntum data goes in `<BryntumSchedulerProProjectModel ref>` and the scheduler gets `project={ref}`. Inline store config on `project` triggers a dev warning.
+- AG Studio needs no CSS import (it is themed from JS) and a sized parent. Keep `data` and `initialState` stable (`useState`/`useMemo`). `enableStudioDevValidations()` is guarded with `import.meta.env.DEV`, not `process.env`.
+- The two trial install scripts (`@bryntum/schedulerpro-trial`, `@bryntum/schedulerpro-trial-lib`) were read before approval in `pnpm.onlyBuiltDependencies`. They use only `fs`/`path`, with no network access, and stamp an install UUID into the trial's own JS files.
+- The bundle is about 10 MB (3.3 MB gzipped), mostly these two libraries. Code-split per route before deploy (S5.3/S5.4).
+
+**Still unproven from R3**: the Studio Agent Framework hookup (a custom agent that talks to Studio's built-in agents). AG Studio's AI runs through `AgStudioAiModule` plus a model adapter, and the boilerplate's adapter is OpenAI-specific. Quorum is Claude-only, so S4.4 needs an Anthropic adapter behind a server proxy. That is S4.4's risk to retire first.
+
 ## Pending gate items
 
 | Item | Status |
 |---|---|
 | Bot authorization mode (R2, S1.2) | **decided: D4** |
-| AG Studio + Bryntum layout (R3, S1.3) | pending |
+| AG Studio + Bryntum layout (R3, S1.3) | **decided: D5** (one app, one route; Agent Framework still unproven) |
 | Supplier DB role on Render (S1.4) | pending |

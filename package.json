@@ -8,25 +8,39 @@
     "node": ">=22.9"
   },
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
     "test": "vitest run",
     "test:sandbox": "vitest run --config vitest.sandbox.config.ts",
     "test:llm": "vitest run --config vitest.llm.config.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "spike:authorize": "node --env-file=.env --import tsx scripts/spike-authorize.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/react": "19.2.8",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.2",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
+    "vite": "8.3.5",
     "vitest": "^3.2.7"
   },
   "dependencies": {
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@7.3.7",
+    "@bryntum/schedulerpro-react": "7.3.7",
+    "ag-studio": "3.0.0",
+    "ag-studio-react": "3.0.0",
     "paypal": "github:context-plugins/paypal-typescript-sdk#5d0df8a8817e5fdf2e2cd48e68f790ea4730aab2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "zod": "^4.6.7"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "@bryntum/schedulerpro-trial",
+      "@bryntum/schedulerpro-trial-lib"
     ]
   }
 }
