@@ -11,7 +11,8 @@ export const WEBHOOK_ID = "WH-TEST-123";
 export const rawBody = JSON.stringify({ id: "WH-EVT-1", event_type: "PAYMENT.AUTHORIZATION.CREATED", resource: { id: "AUTH-1" } });
 
 export function signedHeaders(body: string, webhookId = WEBHOOK_ID, overrides: Partial<WebhookHeaders> = {}): WebhookHeaders {
-  const transmissionId = "tx-1";
+  // A retried delivery carries a new transmission id; the signature covers whichever one is sent.
+  const transmissionId = overrides["paypal-transmission-id"] ?? "tx-1";
   const transmissionTime = "2026-10-22T12:00:00Z";
   const message = `${transmissionId}|${transmissionTime}|${webhookId}|${crc32(Buffer.from(body))}`;
   return {

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Log } from "../log.ts";
 import { pledgeRoutes } from "../pledge/routes.ts";
 import type { PledgeDeps } from "../pledge/service.ts";
+import { parseEvent, receiveVerified, storeUnverified, type InboxDeps } from "../webhooks/handlers.ts";
 import { verifyWebhookSignature, type GetPublicKey, type WebhookHeaders } from "../webhooks/verify.ts";
 
 export type AppDeps = {
@@ -12,6 +13,8 @@ export type AppDeps = {
   log: Log;
   // Pledge API (S2.5); absent when no database is configured.
   pledges?: PledgeDeps & { paypalClientId: string };
+  // Webhook inbox (S2.6); absent when no database is configured, and the route only verifies and logs.
+  webhooks?: InboxDeps;
 };
 
 const SIGNATURE_HEADERS = [
@@ -53,19 +56,32 @@ export function createApp(deps: AppDeps): Hono {
     const result = await verifyWebhookSignature({ headers, rawBody, webhookId: deps.webhookId, getPublicKey: deps.getPublicKey });
     if (!result.ok) {
       deps.log("paypal_webhook_rejected", { reason: result.reason, transmissionId });
+      if (deps.webhooks) await storeUnverified(deps.webhooks, safeJson(rawBody), rawBody, transmissionId).catch((err: Error) => deps.log("paypal_webhook_store_failed", { error: err.message, transmissionId }));
       return c.json({ error: "invalid signature" }, 400);
     }
 
     // Ids only: event payloads carry payer details that don't belong in logs.
     const event = safeJson(rawBody) as { id?: string; event_type?: string; resource?: { id?: string } } | undefined;
-    deps.log("paypal_webhook", {
-      verified: true,
-      eventId: event?.id,
-      eventType: event?.event_type,
-      resourceId: event?.resource?.id,
-      transmissionId,
-    });
-    return c.json({ received: true });
+    const ids = { eventId: event?.id, eventType: event?.event_type, resourceId: event?.resource?.id, transmissionId };
+    if (!deps.webhooks) {
+      deps.log("paypal_webhook", { verified: true, ...ids });
+      return c.json({ received: true });
+    }
+
+    const parsed = parseEvent(event);
+    if (!parsed) {
+      deps.log("paypal_webhook_rejected", { reason: "malformed_event", ...ids });
+      return c.json({ error: "malformed event" }, 400);
+    }
+    try {
+      const outcome = await receiveVerified(deps.webhooks, parsed, transmissionId);
+      deps.log("paypal_webhook", { verified: true, outcome, ...ids });
+      return c.json({ received: true });
+    } catch (err) {
+      // Not stored (the transaction rolled back), so PayPal's retry will be processed in full.
+      deps.log("paypal_webhook_failed", { error: (err as Error).message, ...ids });
+      return c.json({ error: "processing failed" }, 500);
+    }
   });
 
   if (deps.pledges) app.route("/", pledgeRoutes(deps.pledges));

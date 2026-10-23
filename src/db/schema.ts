@@ -13,6 +13,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -232,17 +233,25 @@ export const paypalOps = pgTable(
 );
 
 // The inbox: one row per PayPal event id, whatever PayPal retries.
-export const webhookEvents = pgTable("webhook_events", {
-  id: id(),
-  paypalEventId: text("paypal_event_id").notNull().unique(),
-  eventType: text("event_type").notNull(),
-  resourceId: text("resource_id"),
-  payload: jsonb("payload").notNull(),
-  verified: boolean("verified").notNull(),
-  receivedAt: ts("received_at").notNull().defaultNow(),
-  processedAt: ts("processed_at"),
-  error: text("error"),
-});
+// Inbox (ARCHITECTURE §5.5). Dedupe is on PayPal's event id among VERIFIED rows only: a PayPal retry
+// reuses the event id with a new transmission id, and a forged copy (stored unverified) must not be able
+// to claim a real event's id first.
+export const webhookEvents = pgTable(
+  "webhook_events",
+  {
+    id: id(),
+    paypalEventId: text("paypal_event_id").notNull(),
+    transmissionId: text("transmission_id"),
+    eventType: text("event_type").notNull(),
+    resourceId: text("resource_id"),
+    payload: jsonb("payload").notNull(),
+    verified: boolean("verified").notNull(),
+    receivedAt: ts("received_at").notNull().defaultNow(),
+    processedAt: ts("processed_at"),
+    error: text("error"),
+  },
+  (t) => [uniqueIndex("webhook_events_verified_event").on(t.paypalEventId).where(sql`${t.verified}`)],
+);
 
 // Append-only: a trigger in the migrations refuses UPDATE and DELETE.
 export const auditLog = pgTable(

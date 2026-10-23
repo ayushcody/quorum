@@ -9,3 +9,6 @@ export function createDb(databaseUrl: string, options: { max?: number } = {}) {
 }
 
 export type Db = ReturnType<typeof createDb>["db"];
+// A transaction handle, or the pool itself: code that must run inside a caller's transaction takes this.
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type Executor = Db | Tx;

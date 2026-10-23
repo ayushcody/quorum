@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
-import type { Db } from "../db/client.ts";
+import type { Db, Executor } from "../db/client.ts";
 import { authorizations, demoSigningKeys, mandates, members, pledges, rounds } from "../db/schema.ts";
 import { runInline, type CallDeps } from "../paypal/call.ts";
 import { fromDollars } from "../policy/money.ts";
@@ -80,7 +80,7 @@ async function recordPledge(deps: PledgeDeps, mandate: VerifiedMandate, canonica
   return { ok: true as const, pledge, created: true };
 }
 
-type PledgeRow = typeof pledges.$inferSelect;
+export type PledgeRow = typeof pledges.$inferSelect;
 
 function createOrder(deps: PledgeDeps, pledge: PledgeRow, mandateHash: string) {
   return runInline(deps, {
@@ -93,31 +93,35 @@ function createOrder(deps: PledgeDeps, pledge: PledgeRow, mandateHash: string) {
   });
 }
 
-type AuthBody = { id?: string; status?: string; amount?: { value?: string }; createTime?: string; expirationTime?: string };
+export type AuthBody = { id?: string; status?: string; amount?: { value?: string }; createTime?: string; expirationTime?: string };
 function firstAuthorization(order: unknown): AuthBody | undefined {
   const o = order as { purchaseUnits?: Array<{ payments?: { authorizations?: AuthBody[] } }> } | null;
   return o?.purchaseUnits?.[0]?.payments?.authorizations?.[0];
 }
 
 // One authorization row per PayPal authorization, written with the pledge's move to `authorized`.
-async function recordAuthorization(deps: PledgeDeps, pledge: PledgeRow, auth: AuthBody, orderId: string) {
-  const created = auth.createTime ? new Date(auth.createTime) : deps.now();
+// Times are PayPal's: honor period from create_time, expiry from expiration_time (ARCHITECTURE §3.6).
+// Runs inside the caller's transaction; the webhook inbox (S2.6) reconciles a lost response through it.
+export async function writeAuthorization(tx: Executor, pledge: PledgeRow, auth: AuthBody & { id: string }, orderId: string, now: Date) {
+  const created = auth.createTime ? new Date(auth.createTime) : now;
   const expires = auth.expirationTime ? new Date(auth.expirationTime) : new Date(created.getTime() + VALIDITY_MS);
-  await deps.db.transaction(async (tx) => {
-    await tx
-      .insert(authorizations)
-      .values({
-        pledgeId: pledge.id,
-        paypalAuthorizationId: auth.id!,
-        amountCents: auth.amount?.value ? fromDollars(auth.amount.value) : pledge.maxExposureCents,
-        currency: "USD",
-        status: "created",
-        paypalExpiresAt: expires,
-        honorEndsAt: new Date(created.getTime() + HONOR_MS),
-      })
-      .onConflictDoNothing({ target: authorizations.paypalAuthorizationId });
-    await tx.update(pledges).set({ status: "authorized", paypalOrderId: orderId, updatedAt: deps.now() }).where(eq(pledges.id, pledge.id));
-  });
+  await tx
+    .insert(authorizations)
+    .values({
+      pledgeId: pledge.id,
+      paypalAuthorizationId: auth.id,
+      amountCents: auth.amount?.value ? fromDollars(auth.amount.value) : pledge.maxExposureCents,
+      currency: "USD",
+      status: "created",
+      paypalExpiresAt: expires,
+      honorEndsAt: new Date(created.getTime() + HONOR_MS),
+    })
+    .onConflictDoNothing({ target: authorizations.paypalAuthorizationId });
+  await tx.update(pledges).set({ status: "authorized", paypalOrderId: orderId, updatedAt: now }).where(eq(pledges.id, pledge.id));
+}
+
+function recordAuthorization(deps: PledgeDeps, pledge: PledgeRow, auth: AuthBody & { id: string }, orderId: string) {
+  return deps.db.transaction((tx) => writeAuthorization(tx, pledge, auth, orderId, deps.now()));
 }
 
 export type SubmitResult = { ok: true; created: boolean; pledgeId: string; orderId: string; mandateHash: string } | Fail;
@@ -165,7 +169,7 @@ export async function authorizePledge(deps: PledgeDeps, pledgeId: string): Promi
   if (op.status !== "succeeded") return fail(op.status === "failed_terminal" ? "paypal_failed" : "paypal_pending");
   const auth = firstAuthorization(op.response);
   if (!auth?.id) return fail("paypal_failed");
-  await recordAuthorization(deps, pledge, auth, pledge.paypalOrderId);
+  await recordAuthorization(deps, pledge, { ...auth, id: auth.id }, pledge.paypalOrderId);
   return { ok: true, pledgeId, authorizationId: auth.id };
 }
 
@@ -194,7 +198,7 @@ export async function pledgeAsBot(
   const order = op.response as { id: string };
   const auth = firstAuthorization(order);
   if (!auth?.id) return fail("paypal_failed");
-  await recordAuthorization(deps, recorded.pledge, auth, order.id);
+  await recordAuthorization(deps, recorded.pledge, { ...auth, id: auth.id }, order.id);
   return { ok: true, pledgeId: recorded.pledge.id, authorizationId: auth.id };
 }
 

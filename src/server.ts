@@ -23,6 +23,7 @@ const database = env.DATABASE_URL ? createDb(env.DATABASE_URL) : undefined;
 const app = createApp({
   webhookId: env.PAYPAL_WEBHOOK_ID,
   ...(database ? { pledges: { db: database.db, port, now: () => new Date(), paypalClientId: env.PAYPAL_CLIENT_ID } } : {}),
+  ...(database ? { webhooks: { db: database.db, now: () => new Date() } } : {}),
   getPublicKey: payPalCertFetcher(),
   ...(env.DATABASE_URL ? { pingDb: makePingDb(env.DATABASE_URL) } : {}),
   log,
