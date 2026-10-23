@@ -1,28 +1,7 @@
-import { useEffect, useState } from "react";
 import { countdown, progress } from "../ui/format.ts";
 import { Icon, Shell } from "../ui/kit.tsx";
-
-export type RoundSummary = {
-  id: string;
-  title: string;
-  unit: string;
-  targetQty: number;
-  minMembers: number;
-  status: string;
-  pledgeDeadlineAt: string;
-  deliveryBy: string;
-  isDemo: boolean;
-  progress: { pledgedQty: number; members: number };
-};
-
-export function useNow(intervalMs = 30_000): Date {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
+import { useNow, usePolling, type RoundSummary } from "../ui/live.ts";
+import { describeFailure } from "../ui/pledge.ts";
 
 export function RoundCard({ round, now }: { round: RoundSummary; now: Date }) {
   const p = progress(round.progress.pledgedQty, round.targetQty);
@@ -31,7 +10,7 @@ export function RoundCard({ round, now }: { round: RoundSummary; now: Date }) {
     <div className="card round-card stack rise">
       <div className="row" style={{ justifyContent: "space-between" }}>
         <span className="badge ok">
-          <span style={{ width: 7, height: 7, borderRadius: 9, background: "currentColor" }} /> Live round
+          <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 9, background: "currentColor" }} /> Live round
         </span>
         <span className="muted num" style={{ fontSize: 14, fontWeight: 600 }}>
           <Icon name="clock" size={14} /> {left.label}
@@ -42,12 +21,12 @@ export function RoundCard({ round, now }: { round: RoundSummary; now: Date }) {
           <Icon name="bean" size={26} />
         </div>
         <div>
-          <h3 style={{ fontSize: 18 }}>{round.title}</h3>
+          <h2 style={{ fontSize: 18 }}>{round.title}</h2>
           <div className="muted" style={{ fontSize: 14 }}>Delivered by {new Date(round.deliveryBy).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</div>
         </div>
       </div>
       <div>
-        <div className={`meter ${p.reached ? "reached" : ""}`} role="progressbar" aria-valuenow={p.percent} aria-valuemin={0} aria-valuemax={100} aria-label="Quantity pledged toward the target">
+        <div className={`meter ${p.reached ? "reached" : ""}`} role="progressbar" aria-valuenow={p.barPercent} aria-valuemin={0} aria-valuemax={100} aria-valuetext={`${round.progress.pledgedQty} of ${round.targetQty} ${round.unit} pledged`} aria-label="Pledged toward the target">
           <span style={{ width: `${Math.max(p.barPercent, 3)}%` }} />
         </div>
       </div>
@@ -67,7 +46,7 @@ export function RoundCard({ round, now }: { round: RoundSummary; now: Date }) {
           <small>to quorum</small>
         </div>
       </div>
-      <a className="btn btn-primary" href={`/round/${round.id}`}>
+      <a className="btn btn-primary" href={`/round/${round.id}`} aria-label={`Join this round: ${round.title}`}>
         Join this round <Icon name="arrow" size={18} />
       </a>
     </div>
@@ -75,19 +54,14 @@ export function RoundCard({ round, now }: { round: RoundSummary; now: Date }) {
 }
 
 export function HomePage() {
-  const [round, setRound] = useState<RoundSummary | null>();
+  // Refreshes so the card's meter moves as shops pledge; a failed poll keeps the last good card.
+  const live = usePolling<{ rounds: RoundSummary[] }>("/api/rounds", 10_000);
+  const round = live.data ? (live.data.rounds[0] ?? null) : undefined;
   const now = useNow();
-
-  useEffect(() => {
-    fetch("/api/rounds")
-      .then((r) => r.json() as Promise<{ rounds: RoundSummary[] }>)
-      .then((body) => setRound(body.rounds[0] ?? null))
-      .catch(() => setRound(null));
-  }, []);
 
   return (
     <Shell>
-      <main>
+      <main id="main">
         <section className="hero">
           <div className="container hero-grid">
             <div>
@@ -123,13 +97,20 @@ export function HomePage() {
               </div>
             </div>
             <div>
-              {round === undefined ? (
-                <div className="card round-card" style={{ minHeight: 360 }} aria-busy="true" />
+              {round === undefined && live.failure ? (
+                <div className="card round-card stack" role="status">
+                  <h2 style={{ fontSize: 20 }}>{describeFailure(live.failure).title}</h2>
+                  <p className="muted" style={{ margin: 0 }}>
+                    We'll keep trying. The open round appears here as soon as Quorum answers.
+                  </p>
+                </div>
+              ) : round === undefined ? (
+                <div className="card round-card skeleton" style={{ minHeight: 360 }} aria-busy="true" aria-label="Loading the open round" />
               ) : round ? (
                 <RoundCard round={round} now={now} />
               ) : (
                 <div className="card round-card stack">
-                  <h3>No round is open right now</h3>
+                  <h2 style={{ fontSize: 20 }}>No round is open right now</h2>
                   <p className="muted">The next buying round opens soon. Check back shortly.</p>
                 </div>
               )}

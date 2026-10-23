@@ -9,9 +9,10 @@
   --surface-2: #f8f9fd;
   --ink: #0d1733;
   --ink-2: #39435c;
-  --muted: #6b7489;
+  --muted: #5d667c;
   --line: #e3e6ef;
   --line-strong: #cfd4e2;
+  --field-line: #848ca1;
 
   --brand: #3d4bf2;
   --brand-ink: #2430c9;
@@ -20,9 +21,10 @@
   --on-brand: #ffffff;
   --crema: #f2a43a;
   --crema-soft: #fff3e2;
-  --ok: #0f9d6d;
+  --crema-ink: #8a5410;
+  --ok: #0b7d57;
   --ok-soft: #e6f6ef;
-  --danger: #d0453f;
+  --danger: #b8322c;
   --danger-soft: #fdecec;
 
   --radius-sm: 10px;
@@ -45,6 +47,7 @@
     --muted: #8d97b0;
     --line: #223053;
     --line-strong: #2e3e68;
+    --field-line: #5a6a94;
     --brand: #7c87ff;
     --brand-ink: #a3abff;
     --brand-soft: rgba(124, 135, 255, 0.14);
@@ -52,6 +55,7 @@
     --on-brand: #0a1022;
     --crema: #f5b55c;
     --crema-soft: rgba(245, 181, 92, 0.13);
+    --crema-ink: #f5c27a;
     --ok: #3fd3a0;
     --ok-soft: rgba(63, 211, 160, 0.12);
     --danger: #ff7a72;
@@ -95,9 +99,25 @@ a {
 }
 
 :focus-visible {
-  outline: 3px solid var(--brand-glow);
-  outline-offset: 2px;
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
   border-radius: 8px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 50;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+.skip-link:focus {
+  top: 12px;
 }
 
 .num {
@@ -149,7 +169,7 @@ a {
   font-size: 12px;
   font-weight: 600;
   background: var(--crema-soft);
-  color: color-mix(in srgb, var(--crema) 70%, var(--ink));
+  color: var(--crema-ink);
 }
 
 .badge.ok {
@@ -256,7 +276,7 @@ a {
   display: flex;
   align-items: center;
   background: var(--surface-2);
-  border: 1.5px solid var(--line);
+  border: 1.5px solid var(--field-line);
   border-radius: var(--radius-sm);
   transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease), background 140ms var(--ease);
 }
@@ -282,6 +302,26 @@ a {
   background: transparent;
   color: var(--ink);
   font: 500 17px var(--font);
+}
+
+.input input::placeholder {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.input input:disabled {
+  cursor: progress;
+}
+
+fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+fieldset:disabled .input {
+  opacity: 0.6;
 }
 
 .input .affix {
@@ -380,4 +420,9 @@ a {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* Headings that receive focus from code (results, page changes) don't need a ring: they aren't controls. */
+[tabindex="-1"]:focus {
+  outline: none;
 }

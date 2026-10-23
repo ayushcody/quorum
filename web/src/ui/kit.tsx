@@ -38,13 +38,16 @@ export function Icon({ name, size = 20, stroke = "currentColor" }: { name: keyof
 export function Shell({ children }: { children: ReactNode }) {
   return (
     <>
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
       <header className="topbar">
         <div className="container">
           <a className="brand" href="/" aria-label="Quorum home">
             <Logo /> Quorum
           </a>
-          <span className="badge" title="Payments run in PayPal's sandbox: no real money moves">
-            <Icon name="shield" size={14} /> Sandbox demo
+          <span className="badge">
+            <Icon name="shield" size={14} /> Sandbox demo<span className="sr-only">: no real money moves</span>
           </span>
         </div>
       </header>
