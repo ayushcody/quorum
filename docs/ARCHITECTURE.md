@@ -76,6 +76,7 @@ src/
   protocol/     messages.ts (zod schemas shared with supplier), hmac.ts
   supplier/     main.ts, env.ts, strategy.ts (supplier's own pure pricing), narrator.ts, fulfillment.ts (Agent Toolkit allowlist), db.ts
   benchmark/    channel3.ts (retail price lookup, cached)
+  receipt/      schema.ts, build.ts, sign.ts (Ed25519), verify.ts, pdf.ts: Settlement Receipts (§9, S5.6)
   db/           schema.ts, client.ts, migrations/
   api/          app.ts (Hono: /health, /webhooks/paypal; exists), cockpit.ts (read models), sse.ts, judge.ts, timeline.ts
   server.ts     quorum-web entry (API + dist/web static + SPA fallback); worker/main.ts is quorum-worker's
@@ -96,6 +97,8 @@ The test parses imports with the TypeScript compiler API, which is already a dep
 5. `@paypal/agent-toolkit` is imported only by `src/supplier/fulfillment.ts`.
 6. `src/supplier/**` imports only `src/supplier/**` and `src/protocol/**`. Nothing in `src/` outside `supplier/` imports `src/supplier/**`.
 7. `ai` and `@ai-sdk/*` are imported only by `src/agents/**`, `src/negotiation/narrator.ts`, `src/supplier/narrator.ts` and `src/supplier/fulfillment.ts`.
+8. `src/receipt/**` imports nothing from `src/paypal/`, `src/outbox/`, `src/settlement/` or LLM code, and `process.env.RECEIPT_SIGNING_KEY` is read only in `src/receipt/sign.ts` (§9.7, S5.6).
+9. `src/api/**`, `src/pledge/**`, `src/webhooks/**` and `src/mcp/**` never import `src/paypal/payments.ts` or `src/settlement/payout.ts` (§10.1, S5.2).
 
 ### Trust boundaries
 
@@ -352,6 +355,8 @@ Pledge:  order_pending → order_created → authorized ⇄ reauthorizing
 - Bryntum Scheduler Pro timeline: pledge window → negotiation → capture → delivery. Capture is dependency-blocked until quorum, and a void or late authorization visibly shifts delivery.
 - `/supplier`: the supplier console (offers received, red-team toggle, invoice, tracking).
 - `/judge`: "Run a full round" and "Run a failure round". Each run creates a fresh demo round and is rate-limited.
+- `/replay/:roundId` (S3.9): Negotiation Replay, with the LLM text and the deterministic move side by side, plus the Attack button for demo rounds. It's served from a committed fixture when no keys are set.
+- `/round/:id/guest` (S5.7): the phone page behind the cockpit's QR code; a one-tap guest pledge on demo rounds (§10.2 caps).
 
 Live updates: SSE from `api/sse.ts` with `round:{id}` events emitted after each committed transaction. No websocket dependency.
 
@@ -359,5 +364,127 @@ Live updates: SSE from `api/sse.ts` with `round:{id}` events emitted after each 
 
 **Installed now (exact pins in package.json; reasons in each adding commit):** `paypal` 2.29.0 (APIMatic SDK, git `context-plugins/paypal-typescript-sdk#5d0df8a`), `hono` 4.13.13, `@hono/node-server` 2.1.5, `postgres` 3.4.9, `zod` 4, `react`/`react-dom` 19.2.8, `ag-studio`/`ag-studio-react` 3.0.0 (pull in ag-grid 36.2.0 and ag-charts 14.2.0), `@bryntum/schedulerpro` (alias of `-trial` 7.3.7) + `@bryntum/schedulerpro-react` 7.3.7, `vite` 8.3.5, `@vitejs/plugin-react` 6.1.2. Dev: `typescript` 5.9, `vitest` 3, `tsx` 4, `@types/*`.
 
-**Still to add when their slice starts:** Drizzle + `drizzle-kit` (S2.1), `fast-check` (S2.2), `ai` + `@ai-sdk/anthropic` (S3.4), `@paypal/agent-toolkit` (S3.7). PayPal JS SDK v6 is a script tag, not a package.
+**Still to add when their slice starts:** Drizzle + `drizzle-kit` (S2.1), `fast-check` (S2.2), `ai` + `@ai-sdk/anthropic` (S3.4), `@paypal/agent-toolkit` (S3.7), `pdf-lib` (S5.6, receipt PDF with the signed JSON attached, §9.5), a QR encoder (S5.7, the cockpit join code). PayPal JS SDK v6 is a script tag, not a package.
 Not added: queues, Redis, websockets, lint plugins for boundaries, Testcontainers, Playwright. The API-level `scripts/smoke.ts` covers end-to-end.
+
+## 9. Settlement Receipt (S5.6, PLAYBOOK #2)
+
+A per-member record of every check that led to their charge (or their release), signed by Quorum so it can be checked offline. It promises nothing on PayPal's behalf: PayPal ids are references that resolve in the sandbox, not PayPal signatures.
+
+### 9.1 When and what
+
+- Built once per participating pledge when its round reaches a terminal money state: `settled` (outcome `charged`) or `voided` (outcome `released`). `UNIQUE(round_id, member_id)` makes rebuilds no-ops.
+- **The signed artifact is the JSON.** The PDF is a rendering of it for people.
+- A member's receipt contains **only their own** mandate and amounts. Other members appear as counts. **L, other members' ceilings and the supplier floor never appear** (sentinel test, like §2's prompt test).
+
+### 9.2 Signing
+
+- **Ed25519** via `node:crypto` (`generateKeyPairSync('ed25519')`, `sign(null, bytes, key)`). No dependency.
+- **Private key**: env `RECEIPT_SIGNING_KEY` (PKCS#8 PEM, base64), web/worker only, read only by `src/receipt/sign.ts`. Never in the repo, never logged.
+- **Public key committed**: `keys/receipt-ed25519.pub.pem`. `keyId` = first 16 hex chars of SHA-256(SPKI DER). Rotation adds a file; old receipts stay verifiable by `keyId`.
+- **Signed bytes**: `canonicalJson(receipt without "signature")` (the same canonical form as mandates, `src/pledge/mandate-sign.ts`). The signature is base64url.
+
+### 9.3 Schema (`src/receipt/schema.ts`, zod; money is integer cents as decimal strings)
+
+```jsonc
+{
+  "schema": "quorum.receipt/1",
+  "receiptId": "uuid",
+  "issuedAt": "ISO-8601",
+  "outcome": "charged" | "released",
+  "round": { "id", "title", "sku", "unit", "targetQty", "minMembers", "status",
+             "finalUnitPriceCents": "1190" | null, "participants": 8, "totalQty": 230 },
+  "member": { "id", "displayName", "businessName" },
+  "mandate": { "canonicalJson", "hash", "signature", "publicKeyJwk" },   // ECDSA P-256, as signed in the browser
+  "amounts": { "authorizedCents", "allocatedQty", "capturedCents" | null },
+  "paypal": { "orderId", "authorizationId", "captureId" | null, "voided": bool,
+              "reauthorizedFrom": "authId" | null },
+  "transcript": { "turns": 6, "sha256": "hex", "url": "/replay/{roundId}" },
+  "checks": [ { "id", "invariant", "pass": true, "detail": "1190 ≤ 1400 cents/kg" } ],
+  "signer": { "alg": "Ed25519", "keyId": "hex16" },
+  "signature": "base64url"
+}
+```
+
+**Checks** are the policy results recorded at decision time (the settlement planner writes them to `audit_log` in the transition transaction; the builder copies them, it does not invent them):
+
+| id | Invariant (§6) | Member-level, recomputable offline? |
+|---|---|---|
+| `mandate_signature_valid` (hash = order `custom_id`) | §2 trust | yes |
+| `price_within_ceiling` | 2 | yes |
+| `qty_within_range` | 4 | yes |
+| `capture_within_authorization` | 1 | yes |
+| `capture_equals_price_times_qty` | 5 | yes |
+| `quorum_met` | 3 | no (round-level; recorded) |
+| `all_or_nothing` | 6 | no (recorded) |
+| `before_mandate_deadline` | 7 | yes |
+| `within_honor_period_or_reauthorized` | 7 | yes |
+
+**Transcript hash**: SHA-256 of `canonicalJson` over the ordered `negotiation_turns` (`seq, side, unit_price_cents, qty, message, intent, policy_verdict, verdict_reason`). Turns never contain L, so hashing them leaks nothing.
+
+### 9.4 Storage and delivery
+
+- Table `receipts`: `id uuid pk`, `round_id fk`, `member_id fk`, `json text not null`, `sha256 char(64) not null`, `key_id text not null`, `created_at`. `UNIQUE(round_id, member_id)`. Append-only (same trigger as `audit_log`).
+- `GET /api/receipts/:id` (JSON) and `GET /api/receipts/:id.pdf`. The id is a random UUID shown only on that member's `/round/:id` page: a capability link. There is no list route. Rate limit per §10.
+
+### 9.5 PDF
+
+`src/receipt/pdf.ts` renders the receipt to one page: outcome, price and amounts, the check table with ✓/✗, the PayPal ids (each a link to the sandbox activity search), the transcript link, `keyId` and the receipt SHA-256, and the line "Verify: `pnpm verify-receipt receipt.json`". Rendered with **`pdf-lib`** (decided 2026-10-23: pure JS, no native build, writes PDF attachments). The PDF **embeds `receipt.json` as an attachment**, so the downloaded PDF alone is verifiable.
+
+### 9.6 `pnpm verify-receipt <file.json | file.pdf> [--key <pem>]`
+
+`scripts/verify-receipt.ts`, offline, needs no keys or network:
+1. Load (from the PDF attachment if given a PDF) and zod-parse.
+2. Pick the public key by `signer.keyId` from `keys/` (or `--key`); unknown key → fail.
+3. Verify the Ed25519 signature over the canonical bytes.
+4. Verify the mandate: `sha256(canonicalJson) == hash`, then ECDSA P-256 with the embedded JWK (`verifyMandate` from `src/pledge/mandate-sign.ts`).
+5. Recompute every member-level check with the pure `src/policy` functions and compare to the recorded `pass`.
+6. Optional `--transcript <replay.json>`: recompute the transcript hash.
+
+Prints one line per step and exits 0 only if all pass.
+
+### 9.7 Boundaries
+
+- **Rule 8 (added to §2)**: `src/receipt/**` imports nothing from `src/paypal/`, `src/outbox/`, `src/settlement/` or LLM code. It reads the DB and the audit log; it never calls PayPal.
+- `RECEIPT_SIGNING_KEY` is read only in `src/receipt/sign.ts` (boundary test greps `process.env.RECEIPT_SIGNING_KEY`).
+
+## 10. Public surface hardening (S5.2, S5.7; #9 if built)
+
+### 10.1 No public route can capture, void or pay out
+
+This holds structurally, not by convention:
+
+1. **quorum-web cannot execute money-moving ops.** `src/server.ts` builds its PayPal port from `ordersHandlers` only, so the web process has handlers for `create_order`, `authorize_order` and `get_order`, and nothing else. A capture, void, reauthorize, refund or payout requested in quorum-web returns a config failure and never reaches PayPal. Only quorum-worker's port has payment handlers, and only `settlement/worker.ts` and `settlement/payout.ts` use them (rule 3).
+2. **No caller picks a target or an amount.** A route can create a pledge in an open round, place an authorization on it, or start a fresh demo round (S5.1). Whether anything is captured or voided, and for how much, is decided by `policy/evaluateRound` from the round's own snapshot, and the planner computes every amount. Nothing in a request body reaches a capture amount, an authorization id or a payout receiver.
+3. **Webhooks only confirm.** Unverified events are stored with `verified=false` and never processed (§5.5).
+
+**Proving test** `test/arch/public-surface.test.ts`:
+- (a) the web port's handler keys equal exactly `{create_order, authorize_order, get_order}`;
+- (b) the mounted Hono routes equal the allowlist in §10.2 (a new route fails the test until it's listed);
+- (c) every public route is hit with fuzzed bodies against the fake port, and the fake port never records a `capture | void | reauthorize | refund | payout` op;
+- (d) rule 9 (added to §2): `src/api/**`, `src/pledge/**`, `src/webhooks/**` and `src/mcp/**` never import `src/paypal/payments.ts` or `src/settlement/payout.ts`.
+
+### 10.2 Route allowlist and limits
+
+Limits are per client IP, taken from Render's proxy header (which header is confirmed in S5.2) and stored only as a salted SHA-256. Counters that guard PayPal or LLM spend live in Postgres (`rate_limits(key, window_start, count)`), so they survive restarts; request-rate buckets are in memory (one web instance).
+
+| Route | Effect | Limits and caps |
+|---|---|---|
+| `GET /health`, static files | none | none |
+| `GET /api/config`, `/api/rounds`, `/api/rounds/:id` | read | 120 req/min/IP |
+| SSE `/api/rounds/:id/stream` | read | 5 streams/IP, 500 total |
+| `POST /api/members`, `POST /api/rounds/:id/pledges`, `POST /api/pledges/:id/authorize` | wallet pledge (v6) | 20 members/h/IP; ≤ 5 unapproved orders per IP; abandoned orders swept (S5.2) |
+| `POST /api/rounds/:id/guest-pledges` (S5.7) | demo-card authorization, **demo rounds only** | 1 per IP per round, 5 per IP per day, 25 guests per round, 200 per day globally; a **server-fixed** share (body price/qty ignored); display name ≤ 40 chars, rendered escaped |
+| `POST /api/judge/runs` (S5.1) | fresh demo round, run to the end | 3/h/IP, 1 concurrent per IP, 40/day globally (each run is a sandbox payout from the co-op) |
+| `POST /api/replay/:roundId/attack` (S3.9) | red-team message into a **demo** round's supplier session; moves no money | 10/h/IP, demo rounds only, sent server-side over the HMAC protocol (the browser never talks to the supplier) |
+| `GET /api/receipts/:id[.pdf]` (S5.6) | read by capability link | 60/min/IP, no list route |
+| `POST /webhooks/paypal` | inbox insert | body ≤ 64 KB, signature-verified; no IP limit (PayPal's IPs) |
+| `/mcp` (#9, only if built) | read tools + `pledge` → the guest path | 30 req/min/IP, 10 tool calls/min/session; `pledge` shares the guest caps exactly; no capture, void, payout or refund tool exists; `src/mcp/**` calls the pledge service, never `src/paypal/` |
+
+### 10.3 Everything public
+
+- **`KILL_SWITCH`** (S5.2) turns off the guest path, judge runs, Attack and MCP (503) while reads keep working.
+- **LLM budget** (S5.2): when the daily token budget is spent, narrators fall back to templated text; rounds still complete.
+- **Bodies** ≤ 16 KB (webhooks 64 KB). Errors return a code, never a stack trace.
+- **Same-origin only**: no CORS headers on `/api/*` (MCP is the one exception, when built). CSP allows PayPal's SDK origin and nothing else third-party; `frame-ancestors 'none'`.
+- **Stale demo rounds**: anything open more than 2 h is voided by the sweep (S5.2), so guest and judge authorizations never pile up.
